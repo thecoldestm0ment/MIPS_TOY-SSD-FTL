@@ -1,181 +1,123 @@
-# =============================================================================
-# nand_model.asm  --  물리 페이지(PBA) 상태와 데이터 관리
-#
-# 실제 NAND 플래시는 page 단위로 read/write, block 단위로 erase가 된다.
-# 여기서는 page 상태(FREE/VALID/INVALID)와 데이터를 배열로 모델링한다.
-# =============================================================================
+# PBA 상태와 data 관리
 
         .text
 
-# -----------------------------------------------------------------------------
-# get_pba_state
-#   역할  : pba_state[pba] 반환
-#   입력  : $a0 = PBA 번호
-#   출력  : $v0 = 상태 (0=FREE, 1=VALID, 2=INVALID)
-# -----------------------------------------------------------------------------
-get_pba_state:
-        sll   $t0, $a0, 2
-        la    $t1, pba_state
-        add   $t1, $t1, $t0
-        lw    $v0, 0($t1)
-        jr    $ra
+get_pba_state:                      # pba_state[pba] 값 반환
+        sll   $t0, $a0, 2           # offset = pba * 4
+        la    $t1, pba_state        # 배열 시작 주소
+        add   $t1, $t1, $t0         # &pba_state[pba]
+        lw    $v0, 0($t1)           # 상태값 읽기
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# set_pba_state
-#   역할  : pba_state[pba] = state
-#   입력  : $a0 = PBA 번호
-#           $a1 = 새 상태값
-#   출력  : 없음
-# -----------------------------------------------------------------------------
-set_pba_state:
-        sll   $t0, $a0, 2
-        la    $t1, pba_state
-        add   $t1, $t1, $t0
-        sw    $a1, 0($t1)
-        jr    $ra
+set_pba_state:                      # pba_state[pba] = state
+        sll   $t0, $a0, 2           # offset = pba * 4
+        la    $t1, pba_state        # 배열 시작 주소
+        add   $t1, $t1, $t0         # &pba_state[pba]
+        sw    $a1, 0($t1)           # 상태값 저장
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# get_pba_data
-#   역할  : pba_data[pba] 반환
-#   입력  : $a0 = PBA 번호
-#   출력  : $v0 = 저장된 데이터
-# -----------------------------------------------------------------------------
-get_pba_data:
-        sll   $t0, $a0, 2
-        la    $t1, pba_data
-        add   $t1, $t1, $t0
-        lw    $v0, 0($t1)
-        jr    $ra
+get_pba_data:                       # pba_data[pba] 값 반환
+        sll   $t0, $a0, 2           # offset = pba * 4
+        la    $t1, pba_data         # 배열 시작 주소
+        add   $t1, $t1, $t0         # &pba_data[pba]
+        lw    $v0, 0($t1)           # data 읽기
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# set_pba_data
-#   역할  : pba_data[pba] = data
-#   입력  : $a0 = PBA 번호
-#           $a1 = 저장할 데이터
-#   출력  : 없음
-# -----------------------------------------------------------------------------
-set_pba_data:
-        sll   $t0, $a0, 2
-        la    $t1, pba_data
-        add   $t1, $t1, $t0
-        sw    $a1, 0($t1)
-        jr    $ra
+set_pba_data:                       # pba_data[pba] = data
+        sll   $t0, $a0, 2           # offset = pba * 4
+        la    $t1, pba_data         # 배열 시작 주소
+        add   $t1, $t1, $t0         # &pba_data[pba]
+        sw    $a1, 0($t1)           # data 저장
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# find_free_pba
-#   역할  : pba_state[0..7]을 순서대로 조회하여 FREE인 첫 번째 PBA를 반환한다.
-#           FREE PBA가 없으면 -1을 반환한다.
-#   입력  : 없음
-#   출력  : $v0 = FREE PBA 번호, 또는 -1
-#
-# C 대응:
-#   for (int i = 0; i < PBA_COUNT; i++)
-#       if (pba_state[i] == FREE) return i;
-#   return -1;
-# -----------------------------------------------------------------------------
-find_free_pba:
-        li    $t0, 0               # i = 0
-        li    $t1, 8               # PBA_COUNT = 8
-        la    $t2, pba_state
+find_free_pba:                      # 첫 번째 FREE PBA 찾기
+        li    $t0, 0                # i = 0
+        li    $t1, 8                # PBA 개수
+        la    $t2, pba_state        # 상태 배열 시작 주소
 
-ffp_loop:
-        bge   $t0, $t1, ffp_none
+ffp_loop:                           # pba_state[i] 확인
+        bge   $t0, $t1, ffp_none    # 끝까지 가면 실패
 
-        sll   $t3, $t0, 2
-        add   $t4, $t2, $t3
-        lw    $t5, 0($t4)          # pba_state[i]
+        sll   $t3, $t0, 2           # offset = i * 4
+        add   $t4, $t2, $t3         # &pba_state[i]
+        lw    $t5, 0($t4)           # pba_state[i]
 
-        beqz  $t5, ffp_found       # FREE == 0
+        beqz  $t5, ffp_found        # FREE면 바로 반환
 
-        addiu $t0, $t0, 1
+        addiu $t0, $t0, 1           # i++
         j     ffp_loop
 
-ffp_found:
-        move  $v0, $t0
-        jr    $ra
+ffp_found:                          # FREE PBA 찾음
+        move  $v0, $t0              # 찾은 PBA 번호
+        jr    $ra                   # 호출한 곳으로 복귀
 
-ffp_none:
-        li    $v0, -1
-        jr    $ra
+ffp_none:                           # FREE PBA 없음
+        li    $v0, -1               # 실패 값 반환
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# reset_nand_table
-#   역할  : pba_state 전부 0(FREE), pba_data 전부 0 으로 초기화
-#   입력  : 없음
-#   출력  : 없음
-# -----------------------------------------------------------------------------
-reset_nand_table:
-        li    $t0, 0
-        li    $t1, 8               # PBA_COUNT
-        la    $t2, pba_state
-        la    $t3, pba_data
+reset_nand_table:                   # 상태와 data를 전부 초기화
+        li    $t0, 0                # i = 0
+        li    $t1, 8                # PBA 개수
+        la    $t2, pba_state        # 상태 배열 시작 주소
+        la    $t3, pba_data         # data 배열 시작 주소
 
-rnt_loop:
-        bge   $t0, $t1, rnt_done
+rnt_loop:                           # i번째 PBA 초기화
+        bge   $t0, $t1, rnt_done    # 끝까지 가면 종료
 
-        sll   $t4, $t0, 2
-        add   $t5, $t2, $t4
-        sw    $zero, 0($t5)        # pba_state[i] = FREE
+        sll   $t4, $t0, 2           # offset = i * 4
+        add   $t5, $t2, $t4         # &pba_state[i]
+        sw    $zero, 0($t5)         # pba_state[i] = FREE
 
-        add   $t5, $t3, $t4
-        sw    $zero, 0($t5)        # pba_data[i]  = 0
+        add   $t5, $t3, $t4         # &pba_data[i]
+        sw    $zero, 0($t5)         # pba_data[i] = 0
 
-        addiu $t0, $t0, 1
+        addiu $t0, $t0, 1           # i++
         j     rnt_loop
 
-rnt_done:
-        jr    $ra
+rnt_done:                           # 초기화 끝
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# print_physical_page_table
-#   역할  : PBA 0 ~ 7 의 상태와 데이터를 표 형식으로 출력한다
-#   입력  : 없음
-#   출력  : 없음
-#   주의  : jal 호출 → $ra 스택 저장. $t* 는 jal 후 재로드한다.
-# -----------------------------------------------------------------------------
-print_physical_page_table:
+print_physical_page_table:          # PBA 상태와 data 출력
         addiu $sp, $sp, -4
-        sw    $ra, 0($sp)
+        sw    $ra, 0($sp)           # 복귀 주소
 
-        la    $a0, msg_pba_hdr
+        la    $a0, msg_pba_hdr      # 헤더 출력
         jal   print_string
 
-        li    $t0, 0               # i = 0
+        li    $t0, 0                # i = 0
 
-pppt_loop:
-        li    $t1, 8               # PBA_COUNT (jal 후 매번 재로드)
+pppt_loop:                          # PBA 0~7 출력
+        li    $t1, 8                # PBA 개수
         bge   $t0, $t1, pppt_done
 
-        la    $a0, msg_pba_prefix
+        la    $a0, msg_pba_prefix   # "PBA "
         jal   print_string
-        move  $a0, $t0
+        move  $a0, $t0              # 현재 PBA 출력
         jal   print_int
 
-        la    $a0, msg_sep_state
+        la    $a0, msg_sep_state    # 상태 구분자
         jal   print_string
 
-        # pba_state[i]
-        la    $t2, pba_state
-        sll   $t3, $t0, 2
-        add   $t2, $t2, $t3
-        lw    $a0, 0($t2)
+        la    $t2, pba_state        # 상태 배열 시작 주소
+        sll   $t3, $t0, 2           # offset = i * 4
+        add   $t2, $t2, $t3         # &pba_state[i]
+        lw    $a0, 0($t2)           # 상태 출력
         jal   print_int
 
-        la    $a0, msg_sep_data
+        la    $a0, msg_sep_data     # data 구분자
         jal   print_string
 
-        # pba_data[i]
-        la    $t2, pba_data
-        sll   $t3, $t0, 2
-        add   $t2, $t2, $t3
-        lw    $a0, 0($t2)
+        la    $t2, pba_data         # data 배열 시작 주소
+        sll   $t3, $t0, 2           # offset = i * 4
+        add   $t2, $t2, $t3         # &pba_data[i]
+        lw    $a0, 0($t2)           # data 출력
         jal   print_int
         jal   print_newline
 
-        addiu $t0, $t0, 1
+        addiu $t0, $t0, 1           # i++
         j     pppt_loop
 
-pppt_done:
-        lw    $ra, 0($sp)
+pppt_done:                          # 출력 끝
+        lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
-        jr    $ra
+        jr    $ra                   # 호출한 곳으로 복귀

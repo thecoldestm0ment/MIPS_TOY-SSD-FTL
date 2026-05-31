@@ -1,131 +1,80 @@
-# =============================================================================
-# ftl_mapping.asm  --  LBA-PBA 매핑 테이블 관리 함수
-#
-# 배열 접근 공식:
-#   address = base_address + index * 4
-#
-# MIPS에는 정수 곱셈 대신 sll(shift left logical)을 자주 쓴다.
-#   sll $t0, $a0, 2   →   $t0 = $a0 * 4
-# 2비트 왼쪽으로 밀면 값이 4배가 되는 원리다.
-# (binary에서 1비트 왼쪽 이동 = ×2, 2비트 이동 = ×4)
-# =============================================================================
+# LBA-PBA 매핑
 
         .text
 
-# -----------------------------------------------------------------------------
-# check_lba_range
-#   역할  : LBA가 유효한 범위(0 이상, LBA_COUNT 미만)인지 검사한다
-#   입력  : $a0 = 검사할 LBA 번호
-#   출력  : $v0 = 1 (유효), 0 (범위 초과)
-# -----------------------------------------------------------------------------
-check_lba_range:
-        li    $v0, 0
-        bltz  $a0, clr_fail        # LBA < 0 이면 실패
-        li    $t0, 4               # LBA_COUNT = 4
-        bge   $a0, $t0, clr_fail   # LBA >= 4 이면 실패
-        li    $v0, 1
-clr_fail:
-        jr    $ra
+check_lba_range:                    # LBA가 0~3 범위인지 확인
+        li    $v0, 0                # 기본값은 실패
+        bltz  $a0, clr_fail         # LBA가 0보다 작으면 실패
+        li    $t0, 4                # LBA 개수
+        bge   $a0, $t0, clr_fail    # LBA가 4 이상이면 실패
+        li    $v0, 1                # 범위 안이면 성공
+clr_fail:                           # 검사 끝
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# get_lba_mapping
-#   역할  : lba_map[lba]를 읽어 반환한다
-#   입력  : $a0 = LBA 번호
-#   출력  : $v0 = 매핑된 PBA (-1이면 미매핑)
-#
-# C 대응:
-#   return lba_map[lba];
-# -----------------------------------------------------------------------------
-get_lba_mapping:
-        sll   $t0, $a0, 2          # $t0 = lba * 4  (byte offset)
-        la    $t1, lba_map         # $t1 = lba_map 배열 시작 주소
-        add   $t1, $t1, $t0        # $t1 = &lba_map[lba]
-        lw    $v0, 0($t1)          # $v0 = lba_map[lba]
-        jr    $ra
+get_lba_mapping:                    # lba_map[LBA] 값을 읽어 온다
+        sll   $t0, $a0, 2           # offset = LBA * 4
+        la    $t1, lba_map          # 배열 시작 주소
+        add   $t1, $t1, $t0         # &lba_map[LBA]
+        lw    $v0, 0($t1)           # lba_map[LBA] 반환
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# set_lba_mapping
-#   역할  : lba_map[lba] = pba 로 매핑을 갱신한다
-#   입력  : $a0 = LBA 번호
-#           $a1 = 새 PBA 번호
-#   출력  : 없음
-#
-# C 대응:
-#   lba_map[lba] = pba;
-# -----------------------------------------------------------------------------
-set_lba_mapping:
-        sll   $t0, $a0, 2          # offset = lba * 4
-        la    $t1, lba_map
-        add   $t1, $t1, $t0        # &lba_map[lba]
-        sw    $a1, 0($t1)          # lba_map[lba] = pba
-        jr    $ra
+set_lba_mapping:                    # lba_map[LBA] = PBA
+        sll   $t0, $a0, 2           # offset = LBA * 4
+        la    $t1, lba_map          # 배열 시작 주소
+        add   $t1, $t1, $t0         # &lba_map[LBA]
+        sw    $a1, 0($t1)           # lba_map[LBA] = PBA
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# reset_mapping_table
-#   역할  : lba_map 전체를 -1로 초기화한다
-#   입력  : 없음
-#   출력  : 없음
-# -----------------------------------------------------------------------------
-reset_mapping_table:
-        li    $t0, 0
-        li    $t1, 4               # LBA_COUNT
-        la    $t2, lba_map
+reset_mapping_table:                # 매핑 테이블을 전부 -1로 초기화
+        li    $t0, 0                # i = 0
+        li    $t1, 4                # 반복 끝 값
+        la    $t2, lba_map          # 배열 시작 주소
 
-rmt_loop:
-        bge   $t0, $t1, rmt_done
-        sll   $t3, $t0, 2
-        add   $t4, $t2, $t3
-        li    $t5, -1
-        sw    $t5, 0($t4)          # lba_map[i] = -1
-        addiu $t0, $t0, 1
+rmt_loop:                           # lba_map[i]를 하나씩 초기화
+        bge   $t0, $t1, rmt_done    # 끝까지 가면 종료
+        sll   $t3, $t0, 2           # offset = i * 4
+        add   $t4, $t2, $t3         # &lba_map[i]
+        li    $t5, -1               # 비어 있는 매핑 값
+        sw    $t5, 0($t4)           # lba_map[i] = -1
+        addiu $t0, $t0, 1           # i++
         j     rmt_loop
 
-rmt_done:
-        jr    $ra
+rmt_done:                           # 초기화 끝
+        jr    $ra                   # 호출한 곳으로 복귀
 
-# -----------------------------------------------------------------------------
-# print_mapping_table
-#   역할  : LBA 0 ~ 3 의 현재 매핑 상태를 출력한다
-#   입력  : 없음
-#   출력  : 없음
-#   주의  : jal 호출 → $ra 스택 저장 필요
-# -----------------------------------------------------------------------------
-print_mapping_table:
+print_mapping_table:                # LBA별 현재 매핑을 출력
         addiu $sp, $sp, -4
-        sw    $ra, 0($sp)
+        sw    $ra, 0($sp)           # $ra 저장
 
-        la    $a0, msg_map_hdr
+        la    $a0, msg_map_hdr      # 헤더 출력
         jal   print_string
 
-        li    $t0, 0               # i = 0
-        li    $t1, 4               # LBA_COUNT = 4
-        la    $t2, lba_map
+        li    $t0, 0                # i = 0
+        li    $t1, 4                # LBA 개수
+        la    $t2, lba_map          # 테이블 시작 주소
 
-pmt_loop:
+pmt_loop:                           # LBA 0~3 출력
         bge   $t0, $t1, pmt_done
 
-        la    $a0, msg_lba_prefix
+        la    $a0, msg_lba_prefix   # "LBA "
         jal   print_string
-        move  $a0, $t0
+        move  $a0, $t0              # 현재 LBA 출력
         jal   print_int
-        la    $a0, msg_arrow_pba
+        la    $a0, msg_arrow_pba    # " -> PBA "
         jal   print_string
 
-        # lba_map[i] 읽기
-        # $t0, $t1, $t2 는 $t* 이므로 jal 이후 다시 로드해야 한다
-        sll   $t3, $t0, 2
-        add   $t4, $t2, $t3
-        lw    $a0, 0($t4)
+        sll   $t3, $t0, 2           # offset = i * 4
+        add   $t4, $t2, $t3         # &lba_map[i]
+        lw    $a0, 0($t4)           # 매핑된 PBA 출력
         jal   print_int
         jal   print_newline
 
-        # jal 후 $t* 재로드
-        li    $t1, 4
-        la    $t2, lba_map
-        addiu $t0, $t0, 1
+        li    $t1, 4                # jal 뒤에 반복 끝 값 다시 준비
+        la    $t2, lba_map          # jal 뒤에 테이블 주소 다시 준비
+        addiu $t0, $t0, 1           # i++
         j     pmt_loop
 
-pmt_done:
-        lw    $ra, 0($sp)
+pmt_done:                           # 출력 끝
+        lw    $ra, 0($sp)           # $ra 복구
         addiu $sp, $sp, 4
-        jr    $ra
+        jr    $ra                   # 호출한 곳으로 복귀

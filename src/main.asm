@@ -1,33 +1,16 @@
-# =============================================================================
-# main.asm  --  프로그램 시작점, 초기화, 메뉴 루프
-#
-# 파일 구성:
-#   main.asm       - 진입점, 메뉴 루프
-#   data.asm       - 전역 데이터, 상수, 배열, 통계 변수
-#   util.asm       - 공통 유틸리티 함수
-#   ftl_mapping.asm- LBA-PBA 매핑 테이블 함수
-#   nand_model.asm - PBA 상태/데이터 관리 함수
-#   ftl_write.asm  - Write Request 처리
-#   ftl_read.asm   - Read Request 처리
-#   gc.asm         - Simplified Garbage Collection
-#   status.asm     - 테이블/통계 출력 함수
-# =============================================================================
+# 메인 메뉴
 
         .text
         .globl main
 
-main:
-        # $sp는 MARS가 초기화해주므로 별도 설정 불필요
-        j     menu_loop
+main:                               # 프로그램 시작
+        j     menu_loop             # 바로 메뉴로 이동
 
-# -----------------------------------------------------------------------------
-# menu_loop: 메뉴를 반복 출력하고 사용자 입력에 따라 분기한다
-# -----------------------------------------------------------------------------
-menu_loop:
-        la    $a0, msg_menu
+menu_loop:                          # 메뉴를 계속 반복
+        la    $a0, msg_menu         # 메뉴 문자열 출력
         jal   print_string
-        jal   read_int             # $v0 = 선택 번호
-        move  $t0, $v0
+        jal   read_int              # 메뉴 번호 입력
+        move  $t0, $v0              # 입력값 보관
 
         beq   $t0, $zero, menu_exit
         beq   $t0, 1,     menu_write
@@ -42,56 +25,55 @@ menu_loop:
         beq   $t0, 10,    menu_reset
         beq   $t0, 11,    menu_gc
 
-        # 그 외 잘못된 입력
-        la    $a0, msg_invalid_opt
+        la    $a0, msg_invalid_opt  # 잘못된 입력 안내
         jal   print_string
         j     menu_loop
 
-menu_write:
+menu_write:                         # 쓰기 메뉴
         jal   cmd_write
         j     menu_loop
 
-menu_read:
+menu_read:                          # 읽기 메뉴
         jal   cmd_read
         j     menu_loop
 
-menu_map_table:
+menu_map_table:                     # 매핑 테이블 메뉴
         jal   cmd_print_mapping
         j     menu_loop
 
-menu_phys_table:
+menu_phys_table:                    # 물리 페이지 메뉴
         jal   cmd_print_physical
         j     menu_loop
 
-menu_block:
+menu_block:                         # 블록 정보 메뉴
         jal   cmd_print_block
         j     menu_loop
 
-menu_stats:
+menu_stats:                         # 통계 메뉴
         jal   cmd_print_stats
         j     menu_loop
 
-menu_trace:
+menu_trace:                         # Trace 로그 메뉴
         jal   cmd_print_trace
         j     menu_loop
 
-menu_status:
+menu_status:                        # 전체 상태 메뉴
         jal   cmd_full_status
         j     menu_loop
 
-menu_demo:
+menu_demo:                          # demo 메뉴
         jal   cmd_demo
         j     menu_loop
 
-menu_reset:
+menu_reset:                         # reset 메뉴
         jal   cmd_reset
         j     menu_loop
 
-menu_gc:
+menu_gc:                            # GC 메뉴
         jal   cmd_gc
         j     menu_loop
 
-menu_exit:
+menu_exit:                          # 프로그램 종료
         la    $a0, msg_bye
         jal   print_string
         li    $v0, 10

@@ -519,9 +519,7 @@ static void print_mapping_table(void)
     }
 }
 
-/* =============================================================================
- * Physical page table functions
- * ============================================================================= */
+/* Physical page table functions */
 
 /* ASM label: get_pba_state */
 static int get_pba_state(int pba)
@@ -590,9 +588,7 @@ static void print_physical_page_table(void)
     }
 }
 
-/* =============================================================================
- * Block table functions
- * ============================================================================= */
+/* Block table functions */
 
 /* ASM label: get_block_id_by_pba */
 static int get_block_id_by_pba(int pba)
