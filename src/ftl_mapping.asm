@@ -8,10 +8,11 @@ check_lba_range:                    # LBA가 0~3 범위인지 확인
         li    $t0, 4                # LBA 개수
         bge   $a0, $t0, clr_fail    # LBA가 4 이상이면 실패
         li    $v0, 1                # 범위 안이면 성공
+
 clr_fail:                           # 검사 끝
         jr    $ra                   # 호출한 곳으로 복귀
 
-get_lba_mapping:                    # lba_map[LBA] 값을 읽어 온다
+get_lba_mapping:                    # lba_map[LBA] 값을 읽어 옴
         sll   $t0, $a0, 2           # offset = LBA * 4
         la    $t1, lba_map          # 배열 시작 주소
         add   $t1, $t1, $t0         # &lba_map[LBA]
@@ -27,10 +28,10 @@ set_lba_mapping:                    # lba_map[LBA] = PBA
 
 reset_mapping_table:                # 매핑 테이블을 전부 -1로 초기화
         li    $t0, 0                # i = 0
-        li    $t1, 4                # 반복 끝 값
+        li    $t1, 4                # 반복할 LBA 수
         la    $t2, lba_map          # 배열 시작 주소
 
-rmt_loop:                           # lba_map[i]를 하나씩 초기화
+rmt_loop:                           # lba_map[i] 초기화
         bge   $t0, $t1, rmt_done    # 끝까지 가면 종료
         sll   $t3, $t0, 2           # offset = i * 4
         add   $t4, $t2, $t3         # &lba_map[i]

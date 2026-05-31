@@ -2,7 +2,7 @@
 
         .text
 
-count_valid_pages:                  # VALID page 개수 세기
+count_valid_pages:                  # VALID page 개수를 셈
         li    $t0, 0                # i = 0
         li    $t1, 8                # PBA 개수
         la    $t2, pba_state        # 상태 배열 시작 주소
@@ -26,7 +26,7 @@ cvp_next:                           # 다음 page로 이동
 cvp_done:                           # 계산 끝
         jr    $ra                   # 호출한 곳으로 복귀
 
-print_page_state_summary:           # FREE/VALID/INVALID 요약 출력
+print_page_state_summary:           # FREE, VALID, INVALID 요약 출력
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
 
@@ -63,13 +63,13 @@ print_statistics:                   # 누적 통계 출력
         la    $a0, msg_stats_hdr    # 헤더 출력
         jal   print_string
 
-        la    $a0, msg_st_writes    # WRITE 횟수 출력
+        la    $a0, msg_st_writes    # WRITE 수 출력
         jal   print_string
         lw    $a0, total_write_count
         jal   print_int
         jal   print_newline
 
-        la    $a0, msg_st_reads     # READ 횟수 출력
+        la    $a0, msg_st_reads     # READ 수 출력
         jal   print_string
         lw    $a0, total_read_count
         jal   print_int
@@ -133,9 +133,6 @@ print_full_status:                  # 전체 상태를 한 번에 출력
         jal   print_separator
 
         jal   print_physical_page_table
-        jal   print_separator
-
-        jal   print_block_table
         jal   print_separator
 
         jal   print_trace_log

@@ -10,7 +10,7 @@ log_write_event:                    # WRITE 이벤트를 Trace에 기록
         sw    $a2,  0($sp)          # data
 
         jal   trace_check_full
-        bnez  $v0, lwe_done         # Trace가 꽉 찼으면 종료
+        bnez  $v0, lwe_done         # Trace가 가득 찼으면 종료
 
         lw    $t0, trace_count      # 현재 Trace index
         sll   $t1, $t0, 2           # offset = index * 4
@@ -51,7 +51,7 @@ log_read_event:                     # READ 이벤트를 Trace에 기록
         sw    $a2,  0($sp)          # data
 
         jal   trace_check_full
-        bnez  $v0, lre_done         # Trace가 꽉 찼으면 종료
+        bnez  $v0, lre_done         # Trace가 가득 찼으면 종료
 
         lw    $t0, trace_count      # 현재 Trace index
         sll   $t1, $t0, 2           # offset = index * 4
@@ -90,7 +90,7 @@ log_gc_event:                       # GC 이벤트를 Trace에 기록
         sw    $a0, 0($sp)           # freed count
 
         jal   trace_check_full
-        bnez  $v0, lge_done         # Trace가 꽉 찼으면 종료
+        bnez  $v0, lge_done         # Trace가 가득 찼으면 종료
 
         lw    $t0, trace_count      # 현재 Trace index
         sll   $t1, $t0, 2           # offset = index * 4
@@ -127,7 +127,7 @@ log_reset_event:                    # RESET 이벤트를 Trace에 기록
         sw    $ra, 0($sp)           # 복귀 주소
 
         jal   trace_check_full
-        bnez  $v0, lrese_done       # Trace가 꽉 찼으면 종료
+        bnez  $v0, lrese_done       # Trace가 가득 찼으면 종료
 
         lw    $t0, trace_count      # 현재 Trace index
         sll   $t1, $t0, 2           # offset = index * 4
@@ -158,12 +158,13 @@ lrese_done:                         # RESET 기록 끝
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
 
-trace_check_full:                   # Trace가 꽉 찼는지 확인
+trace_check_full:                   # Trace가 가득 찼는지 확인
         lw    $t0, trace_count      # 현재 기록 개수
         li    $t1, 20               # 최대 20개
         li    $v0, 0                # 기본값은 여유 있음
         blt   $t0, $t1, tcf_ok      # 20 미만이면 기록 가능
         li    $v0, 1                # 20 이상이면 가득 참
+
 tcf_ok:                             # 검사 끝
         jr    $ra                   # 호출한 곳으로 복귀
 

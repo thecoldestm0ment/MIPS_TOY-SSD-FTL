@@ -1,4 +1,4 @@
-# 공용 출력 함수
+# 공용 입출력 함수
 
         .text
 
@@ -7,7 +7,7 @@ print_string:                       # $a0가 가리키는 문자열 출력
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
 
-print_int:                          # $a0에 있는 정수 출력
+print_int:                          # $a0에 든 정수 출력
         li    $v0, 1                # 정수 출력 준비
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
@@ -29,7 +29,7 @@ read_int:                           # 정수 하나를 입력받아 반환
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
 
-run_state:                          # 상태 메시지와 시간 누적 처리
+run_state:                          # 상태 메시지와 시간을 같이 처리
         addiu $sp, $sp, -12
         sw    $ra, 8($sp)           # 복귀 주소
         sw    $a0, 4($sp)           # 메시지 주소

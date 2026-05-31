@@ -17,15 +17,14 @@ menu_loop:                          # 메뉴를 계속 반복
         beq   $t0, 2,     menu_read
         beq   $t0, 3,     menu_map_table
         beq   $t0, 4,     menu_phys_table
-        beq   $t0, 5,     menu_block
-        beq   $t0, 6,     menu_stats
-        beq   $t0, 7,     menu_trace
-        beq   $t0, 8,     menu_status
-        beq   $t0, 9,     menu_demo
-        beq   $t0, 10,    menu_reset
-        beq   $t0, 11,    menu_gc
+        beq   $t0, 5,     menu_stats
+        beq   $t0, 6,     menu_trace
+        beq   $t0, 7,     menu_status
+        beq   $t0, 8,     menu_demo
+        beq   $t0, 9,     menu_reset
+        beq   $t0, 10,    menu_gc
 
-        la    $a0, msg_invalid_opt  # 잘못된 입력 안내
+        la    $a0, msg_invalid_opt  # 잘못된 번호 안내
         jal   print_string
         j     menu_loop
 
@@ -45,15 +44,11 @@ menu_phys_table:                    # 물리 페이지 메뉴
         jal   cmd_print_physical
         j     menu_loop
 
-menu_block:                         # 블록 정보 메뉴
-        jal   cmd_print_block
-        j     menu_loop
-
 menu_stats:                         # 통계 메뉴
         jal   cmd_print_stats
         j     menu_loop
 
-menu_trace:                         # Trace 로그 메뉴
+menu_trace:                         # Trace 메뉴
         jal   cmd_print_trace
         j     menu_loop
 

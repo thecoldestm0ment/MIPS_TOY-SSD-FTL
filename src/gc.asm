@@ -23,28 +23,16 @@ gc_loop:                            # 모든 PBA 확인
         lw    $t4, 0($t2)           # pba_state[i]
 
         li    $t5, 2                # INVALID 값
-        bne   $t4, $t5, gc_next     # INVALID가 아니면 건너뜀
+        bne   $t4, $t5, gc_next     # INVALID 아니면 건너뜀
 
-        sw    $zero, 0($t2)         # INVALID를 FREE로 바꿈
+        sw    $zero, 0($t2)         # pba_state[i] = FREE
 
-        la    $a0, msg_gc_pba_ok    # 어떤 PBA를 정리했는지 출력
+        la    $a0, msg_gc_pba_ok    # 정리한 PBA 출력
         jal   print_string
         move  $a0, $t0
         jal   print_int
-        la    $a0, msg_gc_freed1
+        la    $a0, msg_gc_to_free   # FREE로 바꿨다는 표시
         jal   print_string
-
-        move  $a0, $t0              # 현재 PBA가 속한 block 계산
-        jal   get_block_id_by_pba
-        move  $t6, $v0              # block_id
-
-        move  $a0, $t6              # block 번호 출력
-        jal   print_int
-        la    $a0, msg_gc_freed2
-        jal   print_string
-
-        move  $a0, $t6              # block erase 횟수 증가
-        jal   increase_block_erase_count
 
         addiu $s0, $s0, 1           # freed++
 
@@ -74,7 +62,7 @@ gc_done:                            # GC 마무리
         la    $a0, msg_gc_done      # GC 끝 메시지
         jal   print_string
 
-        move  $a0, $s0              # freed count를 trace에 기록
+        move  $a0, $s0              # freed count를 Trace에 기록
         jal   log_gc_event
 
         lw    $ra, 4($sp)           # 복귀 주소 복구

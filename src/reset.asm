@@ -2,7 +2,7 @@
 
         .text
 
-reset_ssd:                          # SSD 상태를 전부 초기화
+reset_ssd:                          # SSD 상태를 처음으로 돌림
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
 
@@ -11,10 +11,9 @@ reset_ssd:                          # SSD 상태를 전부 초기화
 
         jal   reset_nand_table
         jal   reset_mapping_table
-        jal   reset_block_table
         jal   reset_statistics
         jal   reset_trace_log
-        jal   log_reset_event       # reset 이벤트도 trace에 남김
+        jal   log_reset_event       # reset 이벤트도 Trace에 남김
 
         la    $a0, msg_reset_done   # reset 완료 메시지
         jal   print_string
@@ -23,7 +22,7 @@ reset_ssd:                          # SSD 상태를 전부 초기화
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
 
-reset_statistics:                   # 통계 값을 초기 상태로 되돌림
+reset_statistics:                   # 통계 값을 처음 상태로 돌림
         sw    $zero, total_write_count
         sw    $zero, total_read_count
         sw    $zero, total_state_count

@@ -3,7 +3,7 @@
         .text
         .globl cmd_write, cmd_read
         .globl cmd_print_mapping, cmd_print_physical
-        .globl cmd_print_block, cmd_print_stats
+        .globl cmd_print_stats
         .globl cmd_print_trace, cmd_full_status
         .globl cmd_demo, cmd_reset, cmd_gc
 
@@ -39,14 +39,6 @@ cmd_print_physical:                 # 물리 페이지 메뉴 처리
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
 
-cmd_print_block:                    # 블록 정보 메뉴 처리
-        addiu $sp, $sp, -4
-        sw    $ra, 0($sp)           # 복귀 주소
-        jal   print_block_table
-        lw    $ra, 0($sp)           # 복귀 주소 복구
-        addiu $sp, $sp, 4
-        jr    $ra                   # 호출한 곳으로 복귀
-
 cmd_print_stats:                    # 통계 메뉴 처리
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
@@ -55,7 +47,7 @@ cmd_print_stats:                    # 통계 메뉴 처리
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
 
-cmd_print_trace:                    # Trace 로그 메뉴 처리
+cmd_print_trace:                    # Trace 메뉴 처리
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
         jal   print_trace_log

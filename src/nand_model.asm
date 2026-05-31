@@ -2,35 +2,35 @@
 
         .text
 
-get_pba_state:                      # pba_state[pba] 값 반환
-        sll   $t0, $a0, 2           # offset = pba * 4
+get_pba_state:                      # pba_state[PBA] 값을 읽어 옴
+        sll   $t0, $a0, 2           # offset = PBA * 4
         la    $t1, pba_state        # 배열 시작 주소
-        add   $t1, $t1, $t0         # &pba_state[pba]
-        lw    $v0, 0($t1)           # 상태값 읽기
+        add   $t1, $t1, $t0         # &pba_state[PBA]
+        lw    $v0, 0($t1)           # pba_state[PBA] 반환
         jr    $ra                   # 호출한 곳으로 복귀
 
-set_pba_state:                      # pba_state[pba] = state
-        sll   $t0, $a0, 2           # offset = pba * 4
+set_pba_state:                      # pba_state[PBA] = state
+        sll   $t0, $a0, 2           # offset = PBA * 4
         la    $t1, pba_state        # 배열 시작 주소
-        add   $t1, $t1, $t0         # &pba_state[pba]
+        add   $t1, $t1, $t0         # &pba_state[PBA]
         sw    $a1, 0($t1)           # 상태값 저장
         jr    $ra                   # 호출한 곳으로 복귀
 
-get_pba_data:                       # pba_data[pba] 값 반환
-        sll   $t0, $a0, 2           # offset = pba * 4
+get_pba_data:                       # pba_data[PBA] 값을 읽어 옴
+        sll   $t0, $a0, 2           # offset = PBA * 4
         la    $t1, pba_data         # 배열 시작 주소
-        add   $t1, $t1, $t0         # &pba_data[pba]
-        lw    $v0, 0($t1)           # data 읽기
+        add   $t1, $t1, $t0         # &pba_data[PBA]
+        lw    $v0, 0($t1)           # data 반환
         jr    $ra                   # 호출한 곳으로 복귀
 
-set_pba_data:                       # pba_data[pba] = data
-        sll   $t0, $a0, 2           # offset = pba * 4
+set_pba_data:                       # pba_data[PBA] = data
+        sll   $t0, $a0, 2           # offset = PBA * 4
         la    $t1, pba_data         # 배열 시작 주소
-        add   $t1, $t1, $t0         # &pba_data[pba]
+        add   $t1, $t1, $t0         # &pba_data[PBA]
         sw    $a1, 0($t1)           # data 저장
         jr    $ra                   # 호출한 곳으로 복귀
 
-find_free_pba:                      # 첫 번째 FREE PBA 찾기
+find_free_pba:                      # 첫 번째 FREE PBA를 찾음
         li    $t0, 0                # i = 0
         li    $t1, 8                # PBA 개수
         la    $t2, pba_state        # 상태 배열 시작 주소
@@ -42,16 +42,16 @@ ffp_loop:                           # pba_state[i] 확인
         add   $t4, $t2, $t3         # &pba_state[i]
         lw    $t5, 0($t4)           # pba_state[i]
 
-        beqz  $t5, ffp_found        # FREE면 바로 반환
+        beqz  $t5, ffp_found        # 값이 0이면 바로 반환
 
         addiu $t0, $t0, 1           # i++
         j     ffp_loop
 
-ffp_found:                          # FREE PBA 찾음
+ffp_found:                          # FREE PBA를 찾음
         move  $v0, $t0              # 찾은 PBA 번호
         jr    $ra                   # 호출한 곳으로 복귀
 
-ffp_none:                           # FREE PBA 없음
+ffp_none:                           # FREE PBA가 없음
         li    $v0, -1               # 실패 값 반환
         jr    $ra                   # 호출한 곳으로 복귀
 
@@ -77,7 +77,7 @@ rnt_loop:                           # i번째 PBA 초기화
 rnt_done:                           # 초기화 끝
         jr    $ra                   # 호출한 곳으로 복귀
 
-print_physical_page_table:          # PBA 상태와 data 출력
+print_physical_page_table:          # PBA 상태와 data를 출력
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
 
