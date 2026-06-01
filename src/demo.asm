@@ -133,13 +133,13 @@ run_demo_scenario:                  # 정해진 순서대로 기능 확인
         jr    $ra                   # 호출한 곳으로 복귀
 
         .data
-msg_demo_s1:  .asciiz ": LBA 2에 100 쓰기\n"
-msg_demo_s2:  .asciiz ": LBA 1에 50 쓰기\n"
-msg_demo_s3:  .asciiz ": LBA 2 읽기\n"
-msg_demo_s4:  .asciiz ": LBA 2에 200 다시 쓰기\n"
-msg_demo_s5:  .asciiz ": LBA 2 다시 읽기 (200 예상)\n"
-msg_demo_s6:  .asciiz ": 매핑 테이블 출력\n"
-msg_demo_s7:  .asciiz ": 물리 페이지 테이블 출력\n"
-msg_demo_s8:  .asciiz ": GC 실행\n"
-msg_demo_s9:  .asciiz ": GC 후 물리 페이지 테이블 출력\n"
-msg_demo_s10: .asciiz ": Trace 로그 출력\n"
+msg_demo_s1:  .asciiz ": Write 100 to LBA 2\n"
+msg_demo_s2:  .asciiz ": Write 50 to LBA 1\n"
+msg_demo_s3:  .asciiz ": Read LBA 2\n"
+msg_demo_s4:  .asciiz ": Write 200 to LBA 2 again\n"
+msg_demo_s5:  .asciiz ": Read LBA 2 again (expect 200)\n"
+msg_demo_s6:  .asciiz ": Print mapping table\n"
+msg_demo_s7:  .asciiz ": Print physical page table\n"
+msg_demo_s8:  .asciiz ": Run GC\n"
+msg_demo_s9:  .asciiz ": Print physical page table after GC\n"
+msg_demo_s10: .asciiz ": Print trace log\n"
