@@ -112,6 +112,12 @@ print_statistics:                   # 누적 통계 출력
         jal   print_int
         jal   print_newline
 
+        la    $a0, msg_st_erase
+        jal   print_string
+        lw    $a0, erase_count
+        jal   print_int
+        jal   print_newline
+
         lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
@@ -143,3 +149,4 @@ print_full_status:                  # 전체 상태를 한 번에 출력
         lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
+

@@ -1,4 +1,4 @@
-# 쓰기 처리
+﻿# 쓰기 처리
 
         .text
 
@@ -78,11 +78,6 @@ ftl_write_core:                     # LBA에 data를 쓰고 mapping 갱신
         move  $a0, $s2
         li    $a1, 2
         jal   set_pba_state         # old_pba를 INVALID로 바꿈
-
-        lw    $t0, free_page_count
-        addiu $t0, $t0, -1          # FREE page 수 감소
-        sw    $t0, free_page_count
-
         lw    $t0, invalid_page_count
         addiu $t0, $t0, 1           # INVALID page 수 증가
         sw    $t0, invalid_page_count
@@ -151,6 +146,18 @@ fwc_find_free:                      # 새 PBA 찾기
         j     fwc_done
 
 fwc_no_free:                        # 빈 PBA가 없는 경우
+        li    $t0, -1
+        beq   $s2, $t0, fwc_no_free_msg
+
+        move  $a0, $s2
+        li    $a1, 1
+        jal   set_pba_state         # restore old_pba to VALID
+
+        lw    $t0, invalid_page_count
+        addiu $t0, $t0, -1
+        sw    $t0, invalid_page_count
+
+fwc_no_free_msg:
         la    $a0, msg_no_free
         jal   print_string
 
@@ -162,3 +169,4 @@ fwc_done:                           # 쓰기 처리 끝
         lw    $s3,  0($sp)          # new_pba 복구
         addiu $sp, $sp, 20
         jr    $ra                   # 호출한 곳으로 복귀
+

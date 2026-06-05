@@ -237,3 +237,34 @@ Trace와 statistics는 실행 과정을 확인하기 위해 추가했습니다.
 - "C 파일이 원본인가요?"라고 물으면 `src/*.asm`이 기능별 원본이고, `toy_ftl.asm`은 통합본, `toy_ftl_readable.c`는 설명용 참고 파일이라고 답하는 것이 좋습니다.
 - "가장 중요한 함수는?"이라고 물으면 `ftl_write_core`라고 답하면 됩니다.
 - "직접 구현한 흔적은?"이라고 물으면 기능별 파일 분리, stack frame으로 `$ra/$s` 레지스터 보존, `.word` 배열 offset 계산, trace/statistics/demo 기능을 설명하면 됩니다.
+
+## 9. Block Erase GC 추가 설명
+
+이번 수정에서는 `BLOCK_SIZE = 2`, `BLOCK_COUNT = 4`를 추가해서 PBA 2개를 하나의 block으로 묶었습니다.
+
+```text
+Block 0: PBA 0, 1
+Block 1: PBA 2, 3
+Block 2: PBA 4, 5
+Block 3: PBA 6, 7
+```
+
+GC는 이제 page를 하나씩 지우지 않고 block 단위로 검사합니다.
+block 안에 `VALID` page가 하나라도 있으면 최신 데이터가 사라질 수 있으므로 erase하지 않습니다.
+block 안에 `INVALID` page가 있고 `VALID` page가 없을 때만 block 전체를 `FREE`로 바꾸고 data를 0으로 초기화합니다.
+
+면담 암기 답변:
+
+```text
+기존 GC는 INVALID page를 page 단위로 바로 FREE로 바꿨습니다.
+수정 후에는 PBA 2개를 하나의 block으로 보고 GC가 block 단위로 검사합니다.
+block erase는 block 전체를 지우기 때문에 VALID page가 있으면 건너뜁니다.
+VALID가 없고 INVALID만 있는 block은 전체 erase해서 FREE 상태로 되돌립니다.
+실제 SSD의 block erase 개념을 단순화해서 반영한 구현입니다.
+```
+
+주의해서 말할 점:
+
+- 실제 SSD는 VALID page를 다른 block으로 복사한 뒤 erase하지만, 이 프로젝트는 최소 구현이라 valid migration은 하지 않습니다.
+- 그래서 VALID page가 있는 block은 erase하지 않는 방식으로 데이터를 보호합니다.
+- `erase_count`는 실제 block erase가 몇 번 발생했는지 보여주는 통계입니다.

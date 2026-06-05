@@ -29,6 +29,7 @@ reset_statistics:                   # 통계 값을 처음 상태로 돌림
         sw    $zero, total_simulated_time
         sw    $zero, invalid_page_count
         sw    $zero, gc_count
+        sw    $zero, erase_count
 
         li    $t0, 8                # 시작할 때는 FREE page가 8개
         sw    $t0, free_page_count

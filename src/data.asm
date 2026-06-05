@@ -11,6 +11,8 @@
         .eqv  TTYPE_READ,  2
         .eqv  TTYPE_GC,    3
         .eqv  TTYPE_RESET, 4
+        .eqv  BLOCK_SIZE,  2
+        .eqv  BLOCK_COUNT, 4
 
         .data
 
@@ -31,6 +33,7 @@ total_simulated_time: .word 0
 free_page_count:      .word 8
 invalid_page_count:   .word 0
 gc_count:             .word 0
+erase_count:          .word 0
 
 msg_menu: .asciiz "\n=== SSD FTL Simulator ===\n 1. Write request\n 2. Read request\n 3. Show mapping table\n 4. Show physical pages\n 5. Show statistics\n 6. Show trace log\n 7. Show full status\n 8. Run demo\n 9. Reset SSD\n10. Run GC\n 0. Exit\nSelect: "
 msg_invalid_opt:
@@ -82,6 +85,7 @@ msg_st_free:    .asciiz "FREE page count   : "
 msg_st_valid:   .asciiz "VALID page count  : "
 msg_st_inv:     .asciiz "INVALID page count: "
 msg_st_gc:      .asciiz "GC run count      : "
+msg_st_erase:   .asciiz "Block erase count : "
 
 msg_ps_hdr:     .asciiz "[Page State Summary]\n"
 msg_ps_free:    .asciiz "  FREE    : "
@@ -89,10 +93,13 @@ msg_ps_valid:   .asciiz "  VALID   : "
 msg_ps_invalid: .asciiz "  INVALID : "
 
 msg_gc_start:   .asciiz "[GC] Scanning INVALID pages...\n"
+msg_gc_block_start: .asciiz "[GC] Scanning blocks...\n"
 msg_gc_freed:   .asciiz "[GC] Freed page count: "
 msg_gc_done:    .asciiz "[GC] Done\n"
 msg_gc_pba_ok:  .asciiz "[GC] PBA "
 msg_gc_to_free: .asciiz " -> FREE\n"
+msg_gc_erase_block: .asciiz "[GC] Erase block "
+msg_gc_block_free:  .asciiz " -> FREE pages\n"
 
 msg_trace_hdr:  .asciiz "[Trace Log]\n"
 msg_trace_full: .asciiz "[Trace] Log is full.\n"
