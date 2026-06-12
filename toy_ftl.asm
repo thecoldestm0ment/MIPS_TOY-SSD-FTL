@@ -683,7 +683,7 @@ reset_trace_log:                    # Trace 개수만 0으로 초기화
 
         .text
 
-run_simple_gc:                      # erase blocks that have INVALID pages and no VALID pages
+run_gc:                             # erase blocks that have INVALID pages and no VALID pages
         addiu $sp, $sp, -16
         sw    $ra, 12($sp)
         sw    $s0, 8($sp)           # total freed pages
@@ -1366,7 +1366,7 @@ run_demo_scenario:                  # 정해진 순서대로 기능 확인
         la    $a0, msg_demo_s8
         jal   print_string
 
-        jal   run_simple_gc
+        jal   run_gc
 
         jal   print_separator
 
@@ -1493,7 +1493,7 @@ cmd_reset:                          # reset 메뉴 처리
 cmd_gc:                             # GC 메뉴 처리
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
-        jal   run_simple_gc
+        jal   run_gc
         lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀

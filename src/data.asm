@@ -7,12 +7,13 @@
 
         .eqv  TRACE_MAX,   20     # Trace 최대 개수
 
-        .eqv  TTYPE_WRITE, 1
-        .eqv  TTYPE_READ,  2
-        .eqv  TTYPE_GC,    3
-        .eqv  TTYPE_RESET, 4
-        .eqv  BLOCK_SIZE,  2
-        .eqv  BLOCK_COUNT, 4
+        .eqv  TTYPE_WRITE, 1      # trace event: write
+        .eqv  TTYPE_READ,  2      # trace event: read
+        .eqv  TTYPE_GC,    3      # trace event: block erase GC
+        .eqv  TTYPE_RESET, 4      # trace event: reset
+        .eqv  TTYPE_MIGRATE, 5    # trace event: GC valid page migration
+        .eqv  BLOCK_SIZE,  2      # block 하나에 들어가는 PBA 수
+        .eqv  BLOCK_COUNT, 4      # 전체 block 수 = PBA_COUNT / BLOCK_SIZE
 
         .data
 
@@ -20,10 +21,10 @@ lba_map:            .word -1, -1, -1, -1
 pba_state:          .word  0,  0,  0,  0,  0,  0,  0,  0
 pba_data:           .word  0,  0,  0,  0,  0,  0,  0,  0
 
-trace_type:  .word 0:20
-trace_lba:   .word 0:20
-trace_pba:   .word 0:20
-trace_data:  .word 0:20
+trace_type:  .word 0:20           # event 종류 저장
+trace_lba:   .word 0:20           # 관련 LBA, 없으면 -1
+trace_pba:   .word 0:20           # 관련 PBA 또는 migration 전 old PBA
+trace_data:  .word 0:20           # data, freed count, 또는 migration 후 new PBA
 trace_count: .word 0
 
 total_write_count:    .word 0
@@ -92,12 +93,14 @@ msg_ps_free:    .asciiz "  FREE    : "
 msg_ps_valid:   .asciiz "  VALID   : "
 msg_ps_invalid: .asciiz "  INVALID : "
 
-msg_gc_start:   .asciiz "[GC] Scanning INVALID pages...\n"
 msg_gc_block_start: .asciiz "[GC] Scanning blocks...\n"
+msg_gc_no_victim: .asciiz "[GC] No block has invalid pages.\n"
+msg_gc_victim: .asciiz "[GC] Victim block: "
+msg_gc_move:    .asciiz "[GC] Move valid page PBA "
+msg_gc_to_pba:  .asciiz " -> PBA "
+msg_gc_no_space: .asciiz "[GC] Not enough free page outside victim block.\n"
 msg_gc_freed:   .asciiz "[GC] Freed page count: "
 msg_gc_done:    .asciiz "[GC] Done\n"
-msg_gc_pba_ok:  .asciiz "[GC] PBA "
-msg_gc_to_free: .asciiz " -> FREE\n"
 msg_gc_erase_block: .asciiz "[GC] Erase block "
 msg_gc_block_free:  .asciiz " -> FREE pages\n"
 
@@ -108,8 +111,10 @@ msg_t_write:    .asciiz "WRITE"
 msg_t_read:     .asciiz "READ "
 msg_t_gc:       .asciiz "GC   "
 msg_t_reset:    .asciiz "RESET"
+msg_t_migrate:  .asciiz "MIGRATE"
 msg_t_lba:      .asciiz " | LBA "
 msg_t_pba:      .asciiz " | PBA "
+msg_t_to_pba:   .asciiz " -> PBA "
 msg_t_data:     .asciiz " | DATA "
 msg_t_freed:    .asciiz " | Freed pages: "
 msg_trace_none: .asciiz "(No recorded events)\n"

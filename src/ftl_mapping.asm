@@ -1,4 +1,4 @@
-# LBA-PBA 매핑
+﻿# LBA-PBA 매핑
 
         .text
 
@@ -25,6 +25,28 @@ set_lba_mapping:                    # lba_map[LBA] = PBA
         add   $t1, $t1, $t0         # &lba_map[LBA]
         sw    $a1, 0($t1)           # lba_map[LBA] = PBA
         jr    $ra                   # 호출한 곳으로 복귀
+
+find_lba_by_pba:                    # 특정 PBA를 가리키는 LBA를 찾음
+        li    $t0, 0                # lba = 0
+        li    $t1, LBA_COUNT        # LBA 0~3까지 검사
+        la    $t2, lba_map          # mapping table 시작 주소
+
+flbp_loop:                          # lba_map[lba] == PBA인지 확인
+        bge   $t0, $t1, flbp_none
+        sll   $t3, $t0, 2
+        add   $t4, $t2, $t3
+        lw    $t5, 0($t4)
+        beq   $t5, $a0, flbp_found
+        addiu $t0, $t0, 1
+        j     flbp_loop
+
+flbp_found:                         # 해당 PBA를 가리키는 LBA 발견
+        move  $v0, $t0              # 찾은 LBA 반환
+        jr    $ra
+
+flbp_none:                          # 해당 PBA를 가리키는 LBA가 없음
+        li    $v0, -1               # 실패 값 반환
+        jr    $ra
 
 reset_mapping_table:                # 매핑 테이블을 전부 -1로 초기화
         li    $t0, 0                # i = 0
@@ -79,3 +101,4 @@ pmt_done:                           # 출력 끝
         lw    $ra, 0($sp)           # $ra 복구
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
+

@@ -82,7 +82,7 @@ cmd_reset:                          # reset 메뉴 처리
 cmd_gc:                             # GC 메뉴 처리
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # 복귀 주소
-        jal   run_simple_gc
+        jal   run_gc
         lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
