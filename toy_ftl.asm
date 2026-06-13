@@ -7,12 +7,13 @@
 
         .eqv  TRACE_MAX,   20     # Trace 최대 개수
 
-        .eqv  TTYPE_WRITE, 1
-        .eqv  TTYPE_READ,  2
-        .eqv  TTYPE_GC,    3
-        .eqv  TTYPE_RESET, 4
-        .eqv  BLOCK_SIZE,  2
-        .eqv  BLOCK_COUNT, 4
+        .eqv  TTYPE_WRITE, 1      # trace event: write
+        .eqv  TTYPE_READ,  2      # trace event: read
+        .eqv  TTYPE_GC,    3      # trace event: block erase GC
+        .eqv  TTYPE_RESET, 4      # trace event: reset
+        .eqv  TTYPE_MIGRATE, 5    # trace event: GC valid page migration
+        .eqv  BLOCK_SIZE,  2      # block 하나에 들어가는 PBA 수
+        .eqv  BLOCK_COUNT, 4      # 전체 block 수 = PBA_COUNT / BLOCK_SIZE
 
         .data
 
@@ -20,10 +21,10 @@ lba_map:            .word -1, -1, -1, -1
 pba_state:          .word  0,  0,  0,  0,  0,  0,  0,  0
 pba_data:           .word  0,  0,  0,  0,  0,  0,  0,  0
 
-trace_type:  .word 0:20
-trace_lba:   .word 0:20
-trace_pba:   .word 0:20
-trace_data:  .word 0:20
+trace_type:  .word 0:20           # event 종류 저장
+trace_lba:   .word 0:20           # 관련 LBA, 없으면 -1
+trace_pba:   .word 0:20           # 관련 PBA 또는 migration 전 old PBA
+trace_data:  .word 0:20           # data, freed count, 또는 migration 후 new PBA
 trace_count: .word 0
 
 total_write_count:    .word 0
@@ -92,12 +93,14 @@ msg_ps_free:    .asciiz "  FREE    : "
 msg_ps_valid:   .asciiz "  VALID   : "
 msg_ps_invalid: .asciiz "  INVALID : "
 
-msg_gc_start:   .asciiz "[GC] Scanning INVALID pages...\n"
 msg_gc_block_start: .asciiz "[GC] Scanning blocks...\n"
+msg_gc_no_victim: .asciiz "[GC] No block has invalid pages.\n"
+msg_gc_victim: .asciiz "[GC] Victim block: "
+msg_gc_move:    .asciiz "[GC] Move valid page PBA "
+msg_gc_to_pba:  .asciiz " -> PBA "
+msg_gc_no_space: .asciiz "[GC] Not enough free page outside victim block.\n"
 msg_gc_freed:   .asciiz "[GC] Freed page count: "
 msg_gc_done:    .asciiz "[GC] Done\n"
-msg_gc_pba_ok:  .asciiz "[GC] PBA "
-msg_gc_to_free: .asciiz " -> FREE\n"
 msg_gc_erase_block: .asciiz "[GC] Erase block "
 msg_gc_block_free:  .asciiz " -> FREE pages\n"
 
@@ -108,8 +111,10 @@ msg_t_write:    .asciiz "WRITE"
 msg_t_read:     .asciiz "READ "
 msg_t_gc:       .asciiz "GC   "
 msg_t_reset:    .asciiz "RESET"
+msg_t_migrate:  .asciiz "MIGRATE"
 msg_t_lba:      .asciiz " | LBA "
 msg_t_pba:      .asciiz " | PBA "
+msg_t_to_pba:   .asciiz " -> PBA "
 msg_t_data:     .asciiz " | DATA "
 msg_t_freed:    .asciiz " | Freed pages: "
 msg_trace_none: .asciiz "(No recorded events)\n"
@@ -120,6 +125,13 @@ msg_reset_done:  .asciiz "[Reset] Reset complete.\n"
 msg_demo_hdr:   .asciiz "\n--- Demo start ---\n"
 msg_demo_step:  .asciiz "[Demo] Step "
 msg_demo_end:   .asciiz "--- Demo end ---\n"
+
+# 통합본 시작점
+# MARS/RARS가 main이 아니라 첫 .text 명령부터 실행하는 설정일 때를 대비한다.
+        .text
+
+program_start:
+        j     main                  # 실제 프로그램 시작점으로 이동
 
 # 공용 입출력 함수
 
@@ -219,6 +231,28 @@ set_lba_mapping:                    # lba_map[LBA] = PBA
         sw    $a1, 0($t1)           # lba_map[LBA] = PBA
         jr    $ra                   # 호출한 곳으로 복귀
 
+find_lba_by_pba:                    # 특정 PBA를 가리키는 LBA를 찾음
+        li    $t0, 0                # lba = 0
+        li    $t1, LBA_COUNT        # LBA 0~3까지 검사
+        la    $t2, lba_map          # mapping table 시작 주소
+
+flbp_loop:                          # lba_map[lba] == PBA인지 확인
+        bge   $t0, $t1, flbp_none
+        sll   $t3, $t0, 2
+        add   $t4, $t2, $t3
+        lw    $t5, 0($t4)
+        beq   $t5, $a0, flbp_found
+        addiu $t0, $t0, 1
+        j     flbp_loop
+
+flbp_found:                         # 해당 PBA를 가리키는 LBA 발견
+        move  $v0, $t0              # 찾은 LBA 반환
+        jr    $ra
+
+flbp_none:                          # 해당 PBA를 가리키는 LBA가 없음
+        li    $v0, -1               # 실패 값 반환
+        jr    $ra
+
 reset_mapping_table:                # 매핑 테이블을 전부 -1로 초기화
         li    $t0, 0                # i = 0
         li    $t1, 4                # 반복할 LBA 수
@@ -276,6 +310,98 @@ pmt_done:                           # 출력 끝
 # PBA 상태와 data 관리
 
         .text
+
+find_free_pba_excluding_block:      # victim block 밖에서 FREE PBA를 찾음
+        li    $t0, BLOCK_SIZE
+        mul   $t1, $a0, $t0         # start_pba = block_id * BLOCK_SIZE
+        add   $t2, $t1, $t0         # end_pba = start_pba + BLOCK_SIZE
+        li    $t3, 0                # pba = 0
+
+ffpeb_loop:                         # PBA 0~7을 순회
+        li    $t4, PBA_COUNT
+        bge   $t3, $t4, ffpeb_none
+
+        blt   $t3, $t1, ffpeb_check # victim 시작 전이면 검사
+        blt   $t3, $t2, ffpeb_next  # victim block 내부면 건너뜀
+
+ffpeb_check:                        # victim 밖 PBA가 FREE인지 확인
+        la    $t5, pba_state
+        sll   $t6, $t3, 2
+        add   $t5, $t5, $t6
+        lw    $t7, 0($t5)
+        beqz  $t7, ffpeb_found
+
+ffpeb_next:                         # 다음 PBA로 이동
+        addiu $t3, $t3, 1
+        j     ffpeb_loop
+
+ffpeb_found:                        # FREE PBA를 찾았으면 번호 반환
+        move  $v0, $t3
+        jr    $ra
+
+ffpeb_none:                         # victim 밖에 FREE PBA가 없음
+        li    $v0, -1
+        jr    $ra
+
+erase_block:                        # block 안의 모든 page를 FREE/data 0으로 erase
+        li    $t0, BLOCK_SIZE
+        mul   $t1, $a0, $t0         # start_pba
+        add   $t2, $t1, $t0         # end_pba
+        move  $t3, $t1
+
+eb_loop:                            # block 시작 PBA부터 끝 PBA 전까지 초기화
+        bge   $t3, $t2, eb_done
+        sll   $t4, $t3, 2
+
+        la    $t5, pba_state
+        add   $t5, $t5, $t4
+        sw    $zero, 0($t5)
+
+        la    $t5, pba_data
+        add   $t5, $t5, $t4
+        sw    $zero, 0($t5)
+
+        addiu $t3, $t3, 1
+        j     eb_loop
+
+eb_done:                            # block erase 완료
+        jr    $ra
+
+recount_page_counts:                # pba_state 전체를 다시 세서 count를 재계산
+        li    $t0, 0                # pba = 0
+        li    $t1, 0                # free_count = 0
+        li    $t2, 0                # invalid_count = 0
+
+rpc_loop:                           # 모든 PBA 상태 확인
+        li    $t3, PBA_COUNT
+        bge   $t0, $t3, rpc_done
+
+        la    $t4, pba_state
+        sll   $t5, $t0, 2
+        add   $t4, $t4, $t5
+        lw    $t6, 0($t4)
+
+        li    $t7, FREE
+        beq   $t6, $t7, rpc_count_free
+        li    $t7, INVALID
+        beq   $t6, $t7, rpc_count_invalid
+        j     rpc_next
+
+rpc_count_free:                     # FREE page 수 증가
+        addiu $t1, $t1, 1
+        j     rpc_next
+
+rpc_count_invalid:                  # INVALID page 수 증가
+        addiu $t2, $t2, 1
+
+rpc_next:                           # 다음 PBA로 이동
+        addiu $t0, $t0, 1
+        j     rpc_loop
+
+rpc_done:                           # 재계산한 count를 전역 변수에 저장
+        sw    $t1, free_page_count
+        sw    $t2, invalid_page_count
+        jr    $ra
 
 get_pba_state:                      # pba_state[PBA] 값을 읽어 옴
         sll   $t0, $a0, 2           # offset = PBA * 4
@@ -397,414 +523,588 @@ pppt_done:                          # 출력 끝
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
 
-# Trace 기록과 출력
+# Trace logging and printing
+# trace는 실행 중 일어난 일을 순서대로 저장해 나중에 한 번에 출력한다.
+# 공통 저장 규칙:
+#   trace_type = 이벤트 종류(WRITE/READ/GC/RESET/MIGRATE)
+#   trace_lba  = 관련 LBA, 없으면 -1
+#   trace_pba  = 관련 PBA 또는 migration 전 old PBA
+#   trace_data = data 값, GC freed count, 또는 migration 후 new PBA
 
         .text
 
-log_write_event:                    # WRITE 이벤트를 Trace에 기록
+log_write_event:                    # WRITE 기록: 어떤 LBA가 어떤 PBA에 어떤 data로 쓰였는지 저장
         addiu $sp, $sp, -16
-        sw    $ra, 12($sp)          # 복귀 주소
-        sw    $a0,  8($sp)          # lba
-        sw    $a1,  4($sp)          # pba
-        sw    $a2,  0($sp)          # data
+        sw    $ra, 12($sp)
+        sw    $a0,  8($sp)          # LBA
+        sw    $a1,  4($sp)          # 새로 할당된 PBA
+        sw    $a2,  0($sp)          # write data
 
         jal   trace_check_full
-        bnez  $v0, lwe_done         # Trace가 가득 찼으면 종료
+        bnez  $v0, lwe_done         # trace가 꽉 차면 기록하지 않고 종료
 
-        lw    $t0, trace_count      # 현재 Trace index
-        sll   $t1, $t0, 2           # offset = index * 4
+        lw    $t0, trace_count      # 현재 기록 위치(index)
+        sll   $t1, $t0, 2           # word 배열 offset = index * 4
 
-        la    $t2, trace_type       # type 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_type[index]
-        li    $t3, 1
-        sw    $t3, 0($t2)           # type = WRITE
-
-        la    $t2, trace_lba        # lba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_lba[index]
-        lw    $t3, 8($sp)           # lba
+        la    $t2, trace_type
+        add   $t2, $t2, $t1
+        li    $t3, TTYPE_WRITE
         sw    $t3, 0($t2)
 
-        la    $t2, trace_pba        # pba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_pba[index]
-        lw    $t3, 4($sp)           # pba
+        la    $t2, trace_lba
+        add   $t2, $t2, $t1
+        lw    $t3, 8($sp)
         sw    $t3, 0($t2)
 
-        la    $t2, trace_data       # data 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_data[index]
-        lw    $t3, 0($sp)           # data
+        la    $t2, trace_pba
+        add   $t2, $t2, $t1
+        lw    $t3, 4($sp)
         sw    $t3, 0($t2)
 
-        addiu $t0, $t0, 1           # trace_count++
+        la    $t2, trace_data
+        add   $t2, $t2, $t1
+        lw    $t3, 0($sp)
+        sw    $t3, 0($t2)
+
+        addiu $t0, $t0, 1
         sw    $t0, trace_count
 
-lwe_done:                           # WRITE 기록 끝
-        lw    $ra, 12($sp)          # 복귀 주소 복구
+lwe_done:
+        lw    $ra, 12($sp)
         addiu $sp, $sp, 16
-        jr    $ra                   # 호출한 곳으로 복귀
+        jr    $ra
 
-log_read_event:                     # READ 이벤트를 Trace에 기록
+log_read_event:                     # READ 기록: 읽은 LBA/PBA와 반환된 data 저장
         addiu $sp, $sp, -16
-        sw    $ra, 12($sp)          # 복귀 주소
-        sw    $a0,  8($sp)          # lba
-        sw    $a1,  4($sp)          # pba
-        sw    $a2,  0($sp)          # data
+        sw    $ra, 12($sp)
+        sw    $a0,  8($sp)          # LBA
+        sw    $a1,  4($sp)          # mapping table이 가리킨 PBA
+        sw    $a2,  0($sp)          # read data
 
         jal   trace_check_full
-        bnez  $v0, lre_done         # Trace가 가득 찼으면 종료
+        bnez  $v0, lre_done
 
-        lw    $t0, trace_count      # 현재 Trace index
-        sll   $t1, $t0, 2           # offset = index * 4
+        lw    $t0, trace_count
+        sll   $t1, $t0, 2
 
-        la    $t2, trace_type       # type 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_type[index]
-        li    $t3, 2
-        sw    $t3, 0($t2)           # type = READ
-
-        la    $t2, trace_lba        # lba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_lba[index]
-        lw    $t3, 8($sp)           # lba
+        la    $t2, trace_type
+        add   $t2, $t2, $t1
+        li    $t3, TTYPE_READ
         sw    $t3, 0($t2)
 
-        la    $t2, trace_pba        # pba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_pba[index]
-        lw    $t3, 4($sp)           # pba
+        la    $t2, trace_lba
+        add   $t2, $t2, $t1
+        lw    $t3, 8($sp)
         sw    $t3, 0($t2)
 
-        la    $t2, trace_data       # data 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_data[index]
-        lw    $t3, 0($sp)           # data
+        la    $t2, trace_pba
+        add   $t2, $t2, $t1
+        lw    $t3, 4($sp)
         sw    $t3, 0($t2)
 
-        addiu $t0, $t0, 1           # trace_count++
+        la    $t2, trace_data
+        add   $t2, $t2, $t1
+        lw    $t3, 0($sp)
+        sw    $t3, 0($t2)
+
+        addiu $t0, $t0, 1
         sw    $t0, trace_count
 
-lre_done:                           # READ 기록 끝
-        lw    $ra, 12($sp)          # 복귀 주소 복구
+lre_done:
+        lw    $ra, 12($sp)
         addiu $sp, $sp, 16
-        jr    $ra                   # 호출한 곳으로 복귀
+        jr    $ra
 
-log_gc_event:                       # GC 이벤트를 Trace에 기록
+log_gc_event:                       # GC 기록: block erase 후 새로 확보된 FREE page 수 저장
         addiu $sp, $sp, -8
-        sw    $ra, 4($sp)           # 복귀 주소
-        sw    $a0, 0($sp)           # freed count
+        sw    $ra, 4($sp)
+        sw    $a0, 0($sp)           # freed count = victim block에 있던 INVALID page 수
 
         jal   trace_check_full
-        bnez  $v0, lge_done         # Trace가 가득 찼으면 종료
+        bnez  $v0, lge_done
 
-        lw    $t0, trace_count      # 현재 Trace index
-        sll   $t1, $t0, 2           # offset = index * 4
+        lw    $t0, trace_count
+        sll   $t1, $t0, 2
 
-        la    $t2, trace_type       # type 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_type[index]
-        li    $t3, 3
-        sw    $t3, 0($t2)           # type = GC
-
-        la    $t2, trace_lba        # lba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_lba[index]
-        li    $t3, -1
-        sw    $t3, 0($t2)           # GC는 lba 없음
-
-        la    $t2, trace_pba        # pba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_pba[index]
-        sw    $t3, 0($t2)           # GC는 pba 없음
-
-        la    $t2, trace_data       # data 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_data[index]
-        lw    $t3, 0($sp)           # freed count
+        la    $t2, trace_type
+        add   $t2, $t2, $t1
+        li    $t3, TTYPE_GC
         sw    $t3, 0($t2)
 
-        addiu $t0, $t0, 1           # trace_count++
+        la    $t2, trace_lba
+        add   $t2, $t2, $t1
+        li    $t3, -1
+        sw    $t3, 0($t2)
+
+        la    $t2, trace_pba
+        add   $t2, $t2, $t1
+        sw    $t3, 0($t2)
+
+        la    $t2, trace_data
+        add   $t2, $t2, $t1
+        lw    $t3, 0($sp)
+        sw    $t3, 0($t2)
+
+        addiu $t0, $t0, 1
         sw    $t0, trace_count
 
-lge_done:                           # GC 기록 끝
-        lw    $ra, 4($sp)           # 복귀 주소 복구
+lge_done:
+        lw    $ra, 4($sp)
         addiu $sp, $sp, 8
-        jr    $ra                   # 호출한 곳으로 복귀
+        jr    $ra
 
-log_reset_event:                    # RESET 이벤트를 Trace에 기록
-        addiu $sp, $sp, -4
-        sw    $ra, 0($sp)           # 복귀 주소
+log_migrate_event:                  # MIGRATE 기록: GC가 VALID page를 old PBA에서 new PBA로 옮긴 사실 저장
+        addiu $sp, $sp, -16
+        sw    $ra, 12($sp)
+        sw    $a0,  8($sp)          # 옮겨진 page가 담당하던 LBA
+        sw    $a1,  4($sp)          # erase될 victim block 안의 old PBA
+        sw    $a2,  0($sp)          # victim block 밖의 new PBA
 
         jal   trace_check_full
-        bnez  $v0, lrese_done       # Trace가 가득 찼으면 종료
+        bnez  $v0, lme_done
 
-        lw    $t0, trace_count      # 현재 Trace index
-        sll   $t1, $t0, 2           # offset = index * 4
+        lw    $t0, trace_count
+        sll   $t1, $t0, 2
 
-        la    $t2, trace_type       # type 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_type[index]
-        li    $t3, 4
-        sw    $t3, 0($t2)           # type = RESET
+        la    $t2, trace_type
+        add   $t2, $t2, $t1
+        li    $t3, TTYPE_MIGRATE
+        sw    $t3, 0($t2)
 
-        la    $t2, trace_lba        # lba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_lba[index]
-        li    $t3, -1
-        sw    $t3, 0($t2)           # RESET은 lba 없음
+        la    $t2, trace_lba
+        add   $t2, $t2, $t1
+        lw    $t3, 8($sp)
+        sw    $t3, 0($t2)
 
-        la    $t2, trace_pba        # pba 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_pba[index]
-        sw    $t3, 0($t2)           # RESET은 pba 없음
+        la    $t2, trace_pba
+        add   $t2, $t2, $t1
+        lw    $t3, 4($sp)
+        sw    $t3, 0($t2)
 
-        la    $t2, trace_data       # data 배열 시작 주소
-        add   $t2, $t2, $t1         # &trace_data[index]
-        sw    $zero, 0($t2)         # RESET은 data 없음
+        la    $t2, trace_data
+        add   $t2, $t2, $t1
+        lw    $t3, 0($sp)
+        sw    $t3, 0($t2)           # MIGRATE에서는 trace_data를 new PBA 저장용으로 재사용
 
-        addiu $t0, $t0, 1           # trace_count++
+        addiu $t0, $t0, 1
         sw    $t0, trace_count
 
-lrese_done:                         # RESET 기록 끝
-        lw    $ra, 0($sp)           # 복귀 주소 복구
-        addiu $sp, $sp, 4
-        jr    $ra                   # 호출한 곳으로 복귀
+lme_done:
+        lw    $ra, 12($sp)
+        addiu $sp, $sp, 16
+        jr    $ra
 
-trace_check_full:                   # Trace가 가득 찼는지 확인
-        lw    $t0, trace_count      # 현재 기록 개수
-        li    $t1, 20               # 최대 20개
-        li    $v0, 0                # 기본값은 여유 있음
-        blt   $t0, $t1, tcf_ok      # 20 미만이면 기록 가능
-        li    $v0, 1                # 20 이상이면 가득 참
-
-tcf_ok:                             # 검사 끝
-        jr    $ra                   # 호출한 곳으로 복귀
-
-print_trace_log:                    # Trace 내용을 순서대로 출력
+log_reset_event:                    # RESET 기록: SSD 상태 초기화가 일어났음을 저장
         addiu $sp, $sp, -4
-        sw    $ra, 0($sp)           # 복귀 주소
+        sw    $ra, 0($sp)
 
-        la    $a0, msg_trace_hdr    # 헤더 출력
+        jal   trace_check_full
+        bnez  $v0, lrese_done
+
+        lw    $t0, trace_count
+        sll   $t1, $t0, 2
+
+        la    $t2, trace_type
+        add   $t2, $t2, $t1
+        li    $t3, TTYPE_RESET
+        sw    $t3, 0($t2)
+
+        la    $t2, trace_lba
+        add   $t2, $t2, $t1
+        li    $t3, -1
+        sw    $t3, 0($t2)
+
+        la    $t2, trace_pba
+        add   $t2, $t2, $t1
+        sw    $t3, 0($t2)
+
+        la    $t2, trace_data
+        add   $t2, $t2, $t1
+        sw    $zero, 0($t2)
+
+        addiu $t0, $t0, 1
+        sw    $t0, trace_count
+
+lrese_done:
+        lw    $ra, 0($sp)
+        addiu $sp, $sp, 4
+        jr    $ra
+
+trace_check_full:                   # trace_count가 TRACE_MAX 이상이면 $v0=1, 아니면 $v0=0
+        lw    $t0, trace_count
+        li    $t1, TRACE_MAX
+        li    $v0, 0
+        blt   $t0, $t1, tcf_ok
+        li    $v0, 1
+
+tcf_ok:
+        jr    $ra
+
+print_trace_log:                    # 저장된 trace event를 0번부터 순서대로 출력
+        addiu $sp, $sp, -8
+        sw    $ra, 4($sp)
+        sw    $s0, 0($sp)           # trace index
+
+        la    $a0, msg_trace_hdr
         jal   print_string
 
-        lw    $t0, trace_count      # 기록 개수 확인
-        beqz  $t0, ptl_empty        # 아무 것도 없으면 안내 출력
+        lw    $t0, trace_count
+        beqz  $t0, ptl_empty
 
-        li    $t0, 0                # i = 0
+        li    $s0, 0
 
-ptl_loop:                           # Trace i번째 출력
-        lw    $t1, trace_count
-        bge   $t0, $t1, ptl_done
+ptl_loop:                           # trace_count만큼 반복하면서 각 event type에 맞게 출력
+        lw    $t0, trace_count
+        bge   $s0, $t0, ptl_done
 
-        move  $a0, $t0              # index 출력
+        move  $a0, $s0
         jal   print_int
         la    $a0, msg_trace_pipe
         jal   print_string
 
-        la    $t2, trace_type       # type 배열 시작 주소
-        sll   $t3, $t0, 2           # offset = i * 4
-        add   $t2, $t2, $t3         # &trace_type[i]
-        lw    $t4, 0($t2)           # type 값
+        la    $t1, trace_type
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $t3, 0($t1)           # 현재 trace entry의 type
 
-        li    $t5, 1
-        beq   $t4, $t5, ptl_write
-        li    $t5, 2
-        beq   $t4, $t5, ptl_read
-        li    $t5, 3
-        beq   $t4, $t5, ptl_gc
-        li    $t5, 4
-        beq   $t4, $t5, ptl_reset
-        j     ptl_type_done
+        li    $t4, TTYPE_WRITE
+        beq   $t3, $t4, ptl_write
+        li    $t4, TTYPE_READ
+        beq   $t3, $t4, ptl_read
+        li    $t4, TTYPE_GC
+        beq   $t3, $t4, ptl_gc
+        li    $t4, TTYPE_RESET
+        beq   $t3, $t4, ptl_reset
+        li    $t4, TTYPE_MIGRATE
+        beq   $t3, $t4, ptl_migrate
+        j     ptl_next
 
-ptl_write:                          # WRITE 타입 출력
+ptl_write:                          # WRITE | LBA x | PBA y | DATA z
         la    $a0, msg_t_write
         jal   print_string
-        j     ptl_print_lba
+        j     ptl_print_lba_pba_data
 
-ptl_read:                           # READ 타입 출력
+ptl_read:                           # READ  | LBA x | PBA y | DATA z
         la    $a0, msg_t_read
         jal   print_string
-        j     ptl_print_lba
+        j     ptl_print_lba_pba_data
 
-ptl_gc:                             # GC 타입 출력
+ptl_gc:                             # GC    | Freed pages: n
         la    $a0, msg_t_gc
         jal   print_string
 
-        la    $t2, trace_data       # data 배열 시작 주소
-        sll   $t3, $t0, 2           # offset = i * 4
-        add   $t2, $t2, $t3         # &trace_data[i]
-        lw    $a2, 0($t2)           # freed count
+        la    $t1, trace_data
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $t3, 0($t1)
 
         la    $a0, msg_t_freed
         jal   print_string
-        move  $a0, $a2
+        move  $a0, $t3
         jal   print_int
         jal   print_newline
         j     ptl_next
 
-ptl_reset:                          # RESET 타입 출력
+ptl_reset:                          # RESET
         la    $a0, msg_t_reset
         jal   print_string
         jal   print_newline
         j     ptl_next
 
-ptl_print_lba:                      # LBA, PBA, DATA 출력
+ptl_migrate:                        # MIGRATE | LBA x | PBA old -> PBA new
+        la    $a0, msg_t_migrate
+        jal   print_string
+
         la    $a0, msg_t_lba
         jal   print_string
-        la    $t2, trace_lba        # lba 배열 시작 주소
-        sll   $t3, $t0, 2           # offset = i * 4
-        add   $t2, $t2, $t3         # &trace_lba[i]
-        lw    $a0, 0($t2)           # lba 출력
+        la    $t1, trace_lba
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $a0, 0($t1)
         jal   print_int
 
         la    $a0, msg_t_pba
         jal   print_string
-        la    $t2, trace_pba        # pba 배열 시작 주소
-        sll   $t3, $t0, 2           # offset = i * 4
-        add   $t2, $t2, $t3         # &trace_pba[i]
-        lw    $a0, 0($t2)           # pba 출력
+        la    $t1, trace_pba
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $a0, 0($t1)
+        jal   print_int
+
+        la    $a0, msg_t_to_pba
+        jal   print_string
+        la    $t1, trace_data
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $a0, 0($t1)
+        jal   print_int
+        jal   print_newline
+        j     ptl_next
+
+ptl_print_lba_pba_data:             # WRITE/READ가 공유하는 LBA, PBA, DATA 출력 코드
+        la    $a0, msg_t_lba
+        jal   print_string
+        la    $t1, trace_lba
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $a0, 0($t1)
+        jal   print_int
+
+        la    $a0, msg_t_pba
+        jal   print_string
+        la    $t1, trace_pba
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $a0, 0($t1)
         jal   print_int
 
         la    $a0, msg_t_data
         jal   print_string
-        la    $t2, trace_data       # data 배열 시작 주소
-        sll   $t3, $t0, 2           # offset = i * 4
-        add   $t2, $t2, $t3         # &trace_data[i]
-        lw    $a0, 0($t2)           # data 출력
+        la    $t1, trace_data
+        sll   $t2, $s0, 2
+        add   $t1, $t1, $t2
+        lw    $a0, 0($t1)
         jal   print_int
         jal   print_newline
 
-ptl_type_done:
-ptl_next:                           # 다음 Trace로 이동
-        addiu $t0, $t0, 1           # i++
+ptl_next:
+        addiu $s0, $s0, 1
         j     ptl_loop
 
-ptl_empty:                          # Trace가 비어 있음
+ptl_empty:
         la    $a0, msg_trace_none
         jal   print_string
 
-ptl_done:                           # Trace 출력 끝
-        lw    $ra, 0($sp)           # 복귀 주소 복구
-        addiu $sp, $sp, 4
-        jr    $ra                   # 호출한 곳으로 복귀
+ptl_done:
+        lw    $ra, 4($sp)
+        lw    $s0, 0($sp)
+        addiu $sp, $sp, 8
+        jr    $ra
 
-reset_trace_log:                    # Trace 개수만 0으로 초기화
+reset_trace_log:                    # clear trace by resetting count
         sw    $zero, trace_count
-        jr    $ra                   # 호출한 곳으로 복귀
+        jr    $ra
 
-# Block erase GC
+# Block 단위 GC + VALID page migration
 
         .text
 
-run_gc:                             # erase blocks that have INVALID pages and no VALID pages
-        addiu $sp, $sp, -16
-        sw    $ra, 12($sp)
-        sw    $s0, 8($sp)           # total freed pages
-        sw    $s1, 4($sp)           # erased block count
-        sw    $s2, 0($sp)           # current block
+run_gc:                              # victim block을 고르고 VALID page를 옮긴 뒤 block erase
+        addiu $sp, $sp, -48
+        sw    $ra, 44($sp)
+        sw    $s0, 40($sp)          # victim block
+        sw    $s1, 36($sp)          # victim invalid count
+        sw    $s2, 32($sp)          # block loop
+        sw    $s3, 28($sp)          # victim valid count
+        sw    $s4, 24($sp)          # outside free count
+        sw    $s5, 20($sp)          # victim start pba
+        sw    $s6, 16($sp)          # victim end pba
+        sw    $s7, 12($sp)          # current pba
+                                      # 8($sp)=data, 4($sp)=lba, 0($sp)=dest pba
 
         la    $a0, msg_gc_block_start
         jal   print_string
 
-        li    $s0, 0                # total_freed = 0
-        li    $s1, 0                # erased_blocks = 0
+        li    $s0, -1               # victim = -1
+        li    $s1, 0                # max invalid count = 0
         li    $s2, 0                # block = 0
 
-gc_block_loop:
+gc_select_block_loop:               # 모든 block을 돌면서 INVALID가 가장 많은 block 찾기
         li    $t0, BLOCK_COUNT
-        bge   $s2, $t0, gc_done
+        bge   $s2, $t0, gc_select_done
 
-        li    $t1, BLOCK_SIZE
-        mul   $t2, $s2, $t1         # start_pba = block * BLOCK_SIZE
-        add   $t3, $t2, $t1         # end_pba = start_pba + BLOCK_SIZE
-        move  $t4, $t2              # pba = start_pba
-        li    $t5, 0                # has_valid = 0
-        li    $t6, 0                # invalid_count = 0
+        li    $t0, BLOCK_SIZE
+        mul   $t1, $s2, $t0         # start_pba
+        add   $t2, $t1, $t0         # end_pba
+        move  $t3, $t1              # pba
+        li    $t4, 0                # invalid_count
 
-gc_scan_loop:
-        bge   $t4, $t3, gc_scan_done
-
-        la    $t7, pba_state
-        sll   $t8, $t4, 2
-        add   $t7, $t7, $t8
-        lw    $t9, 0($t7)
-
-        li    $t0, VALID
-        beq   $t9, $t0, gc_mark_valid
-
-        li    $t0, INVALID
-        bne   $t9, $t0, gc_scan_next
-        addiu $t6, $t6, 1           # invalid_count++
-        j     gc_scan_next
-
-gc_mark_valid:
-        li    $t5, 1                # has_valid = 1
-
-gc_scan_next:
+gc_count_invalid_loop:              # 현재 block 안의 INVALID page 수 계산
+        bge   $t3, $t2, gc_count_invalid_done
+        la    $t5, pba_state
+        sll   $t6, $t3, 2
+        add   $t5, $t5, $t6
+        lw    $t7, 0($t5)
+        li    $t8, INVALID
+        bne   $t7, $t8, gc_count_invalid_next
         addiu $t4, $t4, 1
-        j     gc_scan_loop
 
-gc_scan_done:
-        bnez  $t5, gc_next_block    # keep blocks that contain valid data
-        beqz  $t6, gc_next_block    # nothing to reclaim
+gc_count_invalid_next:
+        addiu $t3, $t3, 1
+        j     gc_count_invalid_loop
 
+gc_count_invalid_done:              # 현재 block 계산이 끝나면 victim 후보와 비교
+        ble   $t4, $s1, gc_select_next_block
+        move  $s1, $t4              # new max invalid count
+        move  $s0, $s2              # victim = block
+
+gc_select_next_block:               # 다음 block 검사
+        addiu $s2, $s2, 1
+        j     gc_select_block_loop
+
+gc_select_done:                     # victim 선택 완료
+        beqz  $s1, gc_no_victim
+
+        la    $a0, msg_gc_victim
+        jal   print_string
+        move  $a0, $s0
+        jal   print_int
+        jal   print_newline
+
+        li    $t0, BLOCK_SIZE
+        mul   $s5, $s0, $t0         # victim start pba
+        add   $s6, $s5, $t0         # victim end pba
+
+        li    $s3, 0                # victim valid count
+        li    $s4, 0                # outside free count
+        li    $s7, 0                # pba = 0
+
+gc_preflight_loop:                  # migration 전에 VALID 수와 밖의 FREE 수를 미리 확인
+        li    $t0, PBA_COUNT
+        bge   $s7, $t0, gc_preflight_done
+
+        la    $t1, pba_state
+        sll   $t2, $s7, 2
+        add   $t1, $t1, $t2
+        lw    $t3, 0($t1)
+
+        blt   $s7, $s5, gc_preflight_outside
+        blt   $s7, $s6, gc_preflight_inside
+        j     gc_preflight_outside
+
+gc_preflight_inside:                # victim block 내부면 VALID page 수를 센다
+        li    $t4, VALID
+        bne   $t3, $t4, gc_preflight_next
+        addiu $s3, $s3, 1
+        j     gc_preflight_next
+
+gc_preflight_outside:               # victim block 밖이면 migration 목적지 후보 FREE 수를 센다
+        li    $t4, FREE
+        bne   $t3, $t4, gc_preflight_next
+        addiu $s4, $s4, 1
+
+gc_preflight_next:
+        addiu $s7, $s7, 1
+        j     gc_preflight_loop
+
+gc_preflight_done:                  # 밖의 FREE가 부족하면 상태 변경 없이 실패 처리
+        blt   $s4, $s3, gc_no_space
+
+        move  $s7, $s5              # pba = victim start
+
+gc_migrate_loop:                    # victim 안 VALID page를 victim 밖 FREE PBA로 복사
+        bge   $s7, $s6, gc_migrate_done
+
+        la    $t0, pba_state
+        sll   $t1, $s7, 2
+        add   $t0, $t0, $t1
+        lw    $t2, 0($t0)
+        li    $t3, VALID
+        bne   $t2, $t3, gc_migrate_next
+
+        move  $a0, $s7
+        jal   get_pba_data
+        sw    $v0, 8($sp)           # 이동할 data 임시 저장
+
+        move  $a0, $s7
+        jal   find_lba_by_pba
+        sw    $v0, 4($sp)           # 이 PBA를 가리키던 LBA 저장
+
+        li    $t0, -1
+        beq   $v0, $t0, gc_no_space
+
+        move  $a0, $s0
+        jal   find_free_pba_excluding_block
+        sw    $v0, 0($sp)           # 새 목적지 PBA 저장
+
+        li    $t0, -1
+        beq   $v0, $t0, gc_no_space
+
+        la    $a0, msg_gc_move
+        jal   print_string
+        move  $a0, $s7
+        jal   print_int
+        la    $a0, msg_gc_to_pba
+        jal   print_string
+        lw    $a0, 0($sp)
+        jal   print_int
+        jal   print_newline
+
+        lw    $a0, 0($sp)
+        li    $a1, VALID
+        jal   set_pba_state
+
+        lw    $a0, 0($sp)
+        lw    $a1, 8($sp)
+        jal   set_pba_data
+
+        lw    $a0, 4($sp)
+        lw    $a1, 0($sp)
+        jal   set_lba_mapping
+
+        lw    $a0, 4($sp)           # migration된 page가 담당하던 LBA
+        move  $a1, $s7              # erase될 victim block 안의 old PBA
+        lw    $a2, 0($sp)           # data가 복사된 victim block 밖의 new PBA
+        jal   log_migrate_event
+
+gc_migrate_next:                    # victim block 안의 다음 PBA 검사
+        addiu $s7, $s7, 1
+        j     gc_migrate_loop
+
+gc_migrate_done:                    # VALID migration이 끝나면 victim block 전체 erase
         la    $a0, msg_gc_erase_block
         jal   print_string
-        move  $a0, $s2
+        move  $a0, $s0
         jal   print_int
         la    $a0, msg_gc_block_free
         jal   print_string
 
-        li    $t1, BLOCK_SIZE
-        mul   $t2, $s2, $t1         # start_pba = block * BLOCK_SIZE
-        add   $t3, $t2, $t1         # end_pba
-        move  $t4, $t2
+        move  $a0, $s0
+        jal   erase_block
 
-gc_erase_loop:
-        bge   $t4, $t3, gc_erase_done
+        jal   recount_page_counts
 
-        sll   $t8, $t4, 2
-
-        la    $t7, pba_state
-        add   $t7, $t7, $t8
-        sw    $zero, 0($t7)         # pba_state[pba] = FREE
-
-        la    $t7, pba_data
-        add   $t7, $t7, $t8
-        sw    $zero, 0($t7)         # pba_data[pba] = 0
-
-        addiu $t4, $t4, 1
-        j     gc_erase_loop
-
-gc_erase_done:
-        add   $s0, $s0, $t6         # total_freed += invalid_count
-        addiu $s1, $s1, 1           # erased_blocks++
-
-        lw    $t0, free_page_count
-        add   $t0, $t0, $t6
-        sw    $t0, free_page_count
-
-        lw    $t0, invalid_page_count
-        sub   $t0, $t0, $t6
-        sw    $t0, invalid_page_count
-
-gc_next_block:
-        addiu $s2, $s2, 1
-        j     gc_block_loop
-
-gc_done:
         lw    $t0, gc_count
         addiu $t0, $t0, 1
         sw    $t0, gc_count
 
         lw    $t0, erase_count
-        add   $t0, $t0, $s1
+        addiu $t0, $t0, 1
         sw    $t0, erase_count
 
         la    $a0, msg_gc_freed
         jal   print_string
-        move  $a0, $s0
+        move  $a0, $s1
         jal   print_int
         jal   print_newline
 
         la    $a0, msg_gc_done
         jal   print_string
 
-        move  $a0, $s0
+        move  $a0, $s1
         jal   log_gc_event
+        j     gc_done
 
-        lw    $ra, 12($sp)
-        lw    $s0, 8($sp)
-        lw    $s1, 4($sp)
-        lw    $s2, 0($sp)
-        addiu $sp, $sp, 16
+gc_no_victim:                       # INVALID page가 없으면 GC를 수행하지 않음
+        la    $a0, msg_gc_no_victim
+        jal   print_string
+        j     gc_done
+
+gc_no_space:                        # migration 목적지 FREE page가 부족한 경우
+        la    $a0, msg_gc_no_space
+        jal   print_string
+
+gc_done:                            # 저장한 register 복구 후 종료
+        lw    $ra, 44($sp)
+        lw    $s0, 40($sp)
+        lw    $s1, 36($sp)
+        lw    $s2, 32($sp)
+        lw    $s3, 28($sp)
+        lw    $s4, 24($sp)
+        lw    $s5, 20($sp)
+        lw    $s6, 16($sp)
+        lw    $s7, 12($sp)
+        addiu $sp, $sp, 48
         jr    $ra
 
 # 통계와 상태 출력
@@ -959,59 +1259,58 @@ print_full_status:                  # 전체 상태를 한 번에 출력
         addiu $sp, $sp, 4
         jr    $ra                   # 호출한 곳으로 복귀
 
-
 # 쓰기 처리
 
         .text
 
-submit_write_request:               # 입력받은 값으로 쓰기 함수 호출
+submit_write_request:               # 입력받은 LBA/data로 write core 호출
         addiu $sp, $sp, -12
-        sw    $ra, 8($sp)           # 복귀 주소
-        sw    $s0, 4($sp)           # LBA
-        sw    $s1, 0($sp)           # data
+        sw    $ra, 8($sp)
+        sw    $s0, 4($sp)
+        sw    $s1, 0($sp)
 
-        la    $a0, msg_write_lba    # LBA 입력 안내
+        la    $a0, msg_write_lba
         jal   print_string
         jal   read_int
-        move  $s0, $v0              # 입력된 LBA
+        move  $s0, $v0
 
-        move  $a0, $s0              # 범위 검사할 LBA
+        move  $a0, $s0
         jal   check_lba_range
-        beqz  $v0, swr_bad_lba      # 범위 밖이면 에러 출력
+        beqz  $v0, swr_bad_lba
 
-        la    $a0, msg_write_data   # data 입력 안내
+        la    $a0, msg_write_data
         jal   print_string
         jal   read_int
-        move  $s1, $v0              # 입력된 data
+        move  $s1, $v0
 
-        move  $a0, $s0              # LBA
-        move  $a1, $s1              # data
+        move  $a0, $s0
+        move  $a1, $s1
         jal   ftl_write_core
         j     swr_done
 
-swr_bad_lba:                        # 잘못된 LBA 입력
+swr_bad_lba:                        # LBA 범위가 잘못된 경우
         la    $a0, msg_lba_range
         jal   print_string
 
-swr_done:                           # 입력 처리 끝
-        lw    $ra, 8($sp)           # 복귀 주소 복구
-        lw    $s0, 4($sp)           # LBA 복구
-        lw    $s1, 0($sp)           # data 복구
+swr_done:                           # 입력 처리 종료
+        lw    $ra, 8($sp)
+        lw    $s0, 4($sp)
+        lw    $s1, 0($sp)
         addiu $sp, $sp, 12
-        jr    $ra                   # 호출한 곳으로 복귀
+        jr    $ra
 
-ftl_write_core:                     # LBA에 data를 쓰고 mapping 갱신
+ftl_write_core:                     # out-of-place write로 새 PBA에 data 저장
         addiu $sp, $sp, -20
-        sw    $ra, 16($sp)          # 복귀 주소
+        sw    $ra, 16($sp)
         sw    $s0, 12($sp)          # lba
         sw    $s1,  8($sp)          # data
         sw    $s2,  4($sp)          # old_pba
         sw    $s3,  0($sp)          # new_pba
 
-        move  $s0, $a0              # 현재 LBA
-        move  $s1, $a1              # 현재 data
+        move  $s0, $a0
+        move  $s1, $a1
 
-        la    $a0, msg_sel_lba      # 선택한 LBA 출력
+        la    $a0, msg_sel_lba
         jal   print_string
         move  $a0, $s0
         jal   print_int
@@ -1019,119 +1318,100 @@ ftl_write_core:                     # LBA에 data를 쓰고 mapping 갱신
 
         move  $a0, $s0              # 기존 mapping 확인
         jal   get_lba_mapping
-        move  $s2, $v0              # old_pba
+        move  $s2, $v0
+
+        jal   find_free_pba         # 상태 변경 전에 새 FREE PBA를 먼저 찾음
+        move  $s3, $v0
 
         li    $t0, -1
-        beq   $s2, $t0, fwc_no_old  # 처음 쓰는 LBA면 바로 새 PBA 찾기
+        beq   $s3, $t0, fwc_no_free # 실패 시 기존 mapping/PBA는 건드리지 않음
 
-        la    $a0, msg_old_pba      # 이전 PBA 출력
+        li    $t0, -1
+        beq   $s2, $t0, fwc_no_old
+
+        la    $a0, msg_old_pba
         jal   print_string
         move  $a0, $s2
         jal   print_int
         jal   print_newline
 
-        la    $a0, msg_pba_inv_a    # INVALID 처리 안내
+        la    $a0, msg_pba_inv_a
         jal   print_string
         move  $a0, $s2
         jal   print_int
         la    $a0, msg_pba_inv_b
         jal   print_string
 
-        move  $a0, $s2
-        li    $a1, 2
-        jal   set_pba_state         # old_pba를 INVALID로 바꿈
-        lw    $t0, invalid_page_count
-        addiu $t0, $t0, 1           # INVALID page 수 증가
-        sw    $t0, invalid_page_count
+        move  $a0, $s2              # overwrite이면 old PBA를 INVALID 처리
+        li    $a1, INVALID
+        jal   set_pba_state
+        j     fwc_program_new
 
-        j     fwc_find_free
-
-fwc_no_old:                         # 처음 쓰는 LBA
+fwc_no_old:                         # 처음 쓰는 LBA라면 invalid 처리할 old PBA가 없음
         la    $a0, msg_no_old_map
         jal   print_string
 
-fwc_find_free:                      # 새 PBA 찾기
-        jal   find_free_pba
-        move  $s3, $v0              # new_pba
-
-        li    $t0, -1
-        beq   $s3, $t0, fwc_no_free # 빈 PBA가 없으면 종료
-
+fwc_program_new:                    # 새 PBA에 data를 쓰고 mapping 갱신
         move  $a0, $s3
-        li    $a1, 1
-        jal   set_pba_state         # new_pba를 VALID로 설정
+        li    $a1, VALID
+        jal   set_pba_state
 
         move  $a0, $s3
         move  $a1, $s1
-        jal   set_pba_data          # new_pba에 data 저장
+        jal   set_pba_data
 
         move  $a0, $s0
         move  $a1, $s3
-        jal   set_lba_mapping       # LBA -> PBA mapping 갱신
+        jal   set_lba_mapping
+
+        jal   recount_page_counts   # 수동 증감 대신 실제 pba_state 기준으로 count 재계산
 
         lw    $t0, total_write_count
-        addiu $t0, $t0, 1           # WRITE 횟수 +1
+        addiu $t0, $t0, 1
         sw    $t0, total_write_count
 
-        lw    $t0, free_page_count
-        addiu $t0, $t0, -1          # FREE page 수 감소
-        sw    $t0, free_page_count
-
-        la    $a0, msg_new_pba      # 새 PBA 출력
+        la    $a0, msg_new_pba
         jal   print_string
         move  $a0, $s3
         jal   print_int
         jal   print_newline
 
-        la    $a0, msg_lba_prefix   # LBA 출력
+        la    $a0, msg_lba_prefix
         jal   print_string
         move  $a0, $s0
         jal   print_int
-        la    $a0, msg_arrow_pba    # PBA 출력
+        la    $a0, msg_arrow_pba
         jal   print_string
         move  $a0, $s3
         jal   print_int
-        la    $a0, msg_data_eq      # data 출력
+        la    $a0, msg_data_eq
         jal   print_string
         move  $a0, $s1
         jal   print_int
         jal   print_newline
 
-        move  $a0, $s0              # lba
-        move  $a1, $s3              # pba
-        move  $a2, $s1              # data
+        move  $a0, $s0
+        move  $a1, $s3
+        move  $a2, $s1
         jal   log_write_event
 
         la    $a0, msg_write_ok
         li    $a1, 1
-        jal   run_state             # 상태 메시지와 시간 처리
+        jal   run_state
         j     fwc_done
 
-fwc_no_free:                        # 빈 PBA가 없는 경우
-        li    $t0, -1
-        beq   $s2, $t0, fwc_no_free_msg
-
-        move  $a0, $s2
-        li    $a1, 1
-        jal   set_pba_state         # restore old_pba to VALID
-
-        lw    $t0, invalid_page_count
-        addiu $t0, $t0, -1
-        sw    $t0, invalid_page_count
-
-fwc_no_free_msg:
+fwc_no_free:                        # FREE PBA가 없으면 write 실패, trace/count 변경 없음
         la    $a0, msg_no_free
         jal   print_string
 
-fwc_done:                           # 쓰기 처리 끝
-        lw    $ra, 16($sp)          # 복귀 주소 복구
-        lw    $s0, 12($sp)          # lba 복구
-        lw    $s1,  8($sp)          # data 복구
-        lw    $s2,  4($sp)          # old_pba 복구
-        lw    $s3,  0($sp)          # new_pba 복구
+fwc_done:                           # 저장한 register 복구 후 종료
+        lw    $ra, 16($sp)
+        lw    $s0, 12($sp)
+        lw    $s1,  8($sp)
+        lw    $s2,  4($sp)
+        lw    $s3,  0($sp)
         addiu $sp, $sp, 20
-        jr    $ra                   # 호출한 곳으로 복귀
-
+        jr    $ra
 
 # 읽기 처리
 
@@ -1263,92 +1543,91 @@ reset_statistics:                   # 통계 값을 처음 상태로 돌림
 
         jr    $ra                   # 호출한 곳으로 복귀
 
-# demo 시나리오
+# Demo scenario
+# 이 demo는 GC migration을 눈으로 확인하기 위한 고정 시나리오다.
+# 핵심 상태:
+#   1) LBA 2를 두 번 쓰면 첫 PBA는 INVALID, 새 PBA는 VALID가 된다.
+#   2) 같은 block 안의 LBA 1 VALID page를 GC가 다른 block으로 migration한다.
+#   3) GC 후 LBA 1 read와 trace log로 data가 보존됐는지 확인한다.
 
         .text
 
-run_demo_scenario:                  # 정해진 순서대로 기능 확인
+run_demo_scenario:                  # overwrite -> migration GC -> read/trace 확인 순서로 실행
         addiu $sp, $sp, -4
-        sw    $ra, 0($sp)           # 복귀 주소
+        sw    $ra, 0($sp)           # demo가 끝난 뒤 menu로 돌아가기 위한 복귀 주소
 
-        la    $a0, msg_demo_hdr     # demo 시작 메시지
+        la    $a0, msg_demo_hdr
         jal   print_string
 
-        la    $a0, msg_demo_step    # 1단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 1
         jal   print_int
         la    $a0, msg_demo_s1
         jal   print_string
 
-        li    $a0, 2                # LBA = 2
+        li    $a0, 2                # LBA 2를 처음 쓰면 보통 첫 FREE PBA(PBA 0)에 저장
         li    $a1, 100              # data = 100
         jal   ftl_write_core
-
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 2단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 2
         jal   print_int
         la    $a0, msg_demo_s2
         jal   print_string
 
-        li    $a0, 1                # LBA = 1
+        li    $a0, 1                # LBA 1은 다음 FREE PBA(PBA 1)에 저장되어 block 0에 남음
         li    $a1, 50               # data = 50
         jal   ftl_write_core
-
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 3단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 3
         jal   print_int
         la    $a0, msg_demo_s3
         jal   print_string
 
-        li    $a0, 2                # LBA = 2
+        li    $a0, 2                # overwrite 전 read가 정상인지 먼저 확인
         jal   ftl_read_core
-
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 4단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 4
         jal   print_int
         la    $a0, msg_demo_s4
         jal   print_string
 
-        li    $a0, 2                # LBA = 2
+        li    $a0, 2                # LBA 2 overwrite: old PBA 0은 INVALID, 새 PBA는 VALID
         li    $a1, 200              # data = 200
         jal   ftl_write_core
-
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 5단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 5
         jal   print_int
         la    $a0, msg_demo_s5
         jal   print_string
 
-        li    $a0, 2                # LBA = 2
+        li    $a0, 2                # mapping이 새 PBA를 가리켜서 200이 읽혀야 함
         jal   ftl_read_core
-
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 6단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 6
         jal   print_int
         la    $a0, msg_demo_s6
         jal   print_string
 
-        jal   print_mapping_table
-
+        jal   print_mapping_table   # GC 전 LBA 1/LBA 2가 어떤 PBA를 가리키는지 확인
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 7단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 7
         jal   print_int
@@ -1356,46 +1635,66 @@ run_demo_scenario:                  # 정해진 순서대로 기능 확인
         jal   print_string
 
         jal   print_physical_page_table
-
+                                      # 여기서 block 0은 PBA 0 INVALID + PBA 1 VALID 상태가 됨
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 8단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 8
         jal   print_int
         la    $a0, msg_demo_s8
         jal   print_string
 
-        jal   run_gc
-
+        jal   run_gc                 # block 0 victim 선택 후 PBA 1의 VALID page를 밖으로 이동
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 9단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 9
         jal   print_int
         la    $a0, msg_demo_s9
         jal   print_string
 
-        jal   print_physical_page_table
-
+        li    $a0, 1                # migration 후에도 LBA 1은 data 50을 읽어야 함
+        jal   ftl_read_core
         jal   print_separator
 
-        la    $a0, msg_demo_step    # 10단계 안내
+        la    $a0, msg_demo_step
         jal   print_string
         li    $a0, 10
         jal   print_int
         la    $a0, msg_demo_s10
         jal   print_string
 
-        jal   print_trace_log
+        jal   print_mapping_table   # LBA 1 mapping이 old PBA 1에서 new PBA로 바뀐 것 확인
+        jal   print_separator
 
-        la    $a0, msg_demo_end     # demo 끝 메시지
+        la    $a0, msg_demo_step
+        jal   print_string
+        li    $a0, 11
+        jal   print_int
+        la    $a0, msg_demo_s11
+        jal   print_string
+
+        jal   print_physical_page_table
+                                      # victim block은 erase되어 PBA 0/PBA 1이 FREE가 되어야 함
+        jal   print_separator
+
+        la    $a0, msg_demo_step
+        jal   print_string
+        li    $a0, 12
+        jal   print_int
+        la    $a0, msg_demo_s12
+        jal   print_string
+
+        jal   print_trace_log       # MIGRATE event와 GC event가 순서대로 남는지 확인
+
+        la    $a0, msg_demo_end
         jal   print_string
 
         lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
-        jr    $ra                   # 호출한 곳으로 복귀
+        jr    $ra
 
         .data
 msg_demo_s1:  .asciiz ": Write 100 to LBA 2\n"
@@ -1403,11 +1702,13 @@ msg_demo_s2:  .asciiz ": Write 50 to LBA 1\n"
 msg_demo_s3:  .asciiz ": Read LBA 2\n"
 msg_demo_s4:  .asciiz ": Write 200 to LBA 2 again\n"
 msg_demo_s5:  .asciiz ": Read LBA 2 again (expect 200)\n"
-msg_demo_s6:  .asciiz ": Print mapping table\n"
-msg_demo_s7:  .asciiz ": Print physical page table\n"
-msg_demo_s8:  .asciiz ": Run GC\n"
-msg_demo_s9:  .asciiz ": Print physical page table after GC\n"
-msg_demo_s10: .asciiz ": Print trace log\n"
+msg_demo_s6:  .asciiz ": Print mapping table before GC\n"
+msg_demo_s7:  .asciiz ": Print physical page table before GC\n"
+msg_demo_s8:  .asciiz ": Run GC (expect valid page migration)\n"
+msg_demo_s9:  .asciiz ": Read LBA 1 after GC (expect 50)\n"
+msg_demo_s10: .asciiz ": Print mapping table after GC\n"
+msg_demo_s11: .asciiz ": Print physical page table after GC\n"
+msg_demo_s12: .asciiz ": Print trace log\n"
 
 # 메뉴용 래퍼 함수
 
@@ -1501,9 +1802,8 @@ cmd_gc:                             # GC 메뉴 처리
 # 메인 메뉴
 
         .text
-        .globl main
 
-main:                               # 프로그램 시작
+main:
         j     menu_loop             # 바로 메뉴로 이동
 
 menu_loop:                          # 메뉴를 계속 반복
