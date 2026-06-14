@@ -25,8 +25,6 @@ reset_ssd:                          # SSD 상태를 처음으로 돌림
 reset_statistics:                   # 통계 값을 처음 상태로 돌림
         sw    $zero, total_write_count
         sw    $zero, total_read_count
-        sw    $zero, total_state_count
-        sw    $zero, total_simulated_time
         sw    $zero, invalid_page_count
         sw    $zero, gc_count
         sw    $zero, erase_count

@@ -135,8 +135,7 @@ fwc_program_new:                    # 새 PBA에 data를 쓰고 mapping 갱신
         jal   log_write_event
 
         la    $a0, msg_write_ok
-        li    $a1, 1
-        jal   run_state
+        jal   print_string
         j     fwc_done
 
 fwc_no_free:                        # FREE PBA가 없으면 write 실패, trace/count 변경 없음

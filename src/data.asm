@@ -30,8 +30,6 @@ trace_count: .word 0
 
 total_write_count:    .word 0
 total_read_count:     .word 0
-total_state_count:    .word 0
-total_simulated_time: .word 0
 free_page_count:      .word 8
 invalid_page_count:   .word 0
 gc_count:             .word 0
@@ -51,8 +49,6 @@ msg_data_eq:    .asciiz ", data = "
 msg_sep_state:  .asciiz " | State: "
 msg_sep_data:   .asciiz " | data "
 msg_colon_sp:   .asciiz ": "
-msg_ms:         .asciiz " ms\n"
-msg_state_op:   .asciiz "[State] "
 
 msg_write_lba:  .asciiz "Enter LBA to write (0-3): "
 msg_write_data: .asciiz "Enter data: "
@@ -81,8 +77,6 @@ msg_full_end:   .asciiz "================================\n"
 
 msg_st_writes:  .asciiz "Total WRITE count : "
 msg_st_reads:   .asciiz "Total READ count  : "
-msg_st_states:  .asciiz "State run count   : "
-msg_st_time:    .asciiz "Total time (ms)   : "
 msg_st_free:    .asciiz "FREE page count   : "
 msg_st_valid:   .asciiz "VALID page count  : "
 msg_st_inv:     .asciiz "INVALID page count: "

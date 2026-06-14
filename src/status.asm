@@ -75,18 +75,6 @@ print_statistics:                   # 누적 통계 출력
         jal   print_int
         jal   print_newline
 
-        la    $a0, msg_st_states    # 상태 실행 수 출력
-        jal   print_string
-        lw    $a0, total_state_count
-        jal   print_int
-        jal   print_newline
-
-        la    $a0, msg_st_time      # 누적 시간 출력
-        jal   print_string
-        lw    $a0, total_simulated_time
-        jal   print_int
-        jal   print_newline
-
         la    $a0, msg_st_free      # FREE page 수 출력
         jal   print_string
         lw    $a0, free_page_count

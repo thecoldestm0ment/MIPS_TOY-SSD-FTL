@@ -57,8 +57,6 @@ static int trace_count = 0;
 
 static int total_write_count = 0;
 static int total_read_count = 0;
-static int total_state_count = 0;
-static int total_simulated_time = 0;
 static int free_page_count = PBA_COUNT;
 static int invalid_page_count = 0;
 static int gc_count = 0;
@@ -98,13 +96,6 @@ static int read_int(void)                          /* 정수 하나 입력 */
     }
 
     return (int)strtol(buf, NULL, 10);
-}
-
-static void run_state(const char *message, int ms) /* 상태 메시지와 시간 누적 */
-{
-    delayed_printf("[State] %s%d ms\n", message, ms);
-    total_state_count++;
-    total_simulated_time += ms;
 }
 
 /* ftl_mapping.asm */
@@ -510,8 +501,6 @@ static void print_statistics(void)
     print_string("[Statistics]\n");
     delayed_printf("Total WRITE count : %d\n", total_write_count);
     delayed_printf("Total READ count  : %d\n", total_read_count);
-    delayed_printf("State run count   : %d\n", total_state_count);
-    delayed_printf("Total time (ms)   : %d\n", total_simulated_time);
     delayed_printf("FREE page count   : %d\n", free_page_count);
     delayed_printf("VALID page count  : %d\n", count_valid_pages());
     delayed_printf("INVALID page count: %d\n", invalid_page_count);
@@ -573,7 +562,7 @@ static void ftl_write_core(int lba, int data)
     delayed_printf("LBA %d -> PBA %d, data = %d\n", lba, new_pba, data);
 
     log_write_event(lba, new_pba, data);
-    run_state("Write complete. ", 1);
+    print_string("Write complete.\n");
 }
 
 static void submit_write_request(void)
@@ -638,8 +627,6 @@ static void reset_statistics(void)
 {
     total_write_count = 0;
     total_read_count = 0;
-    total_state_count = 0;
-    total_simulated_time = 0;
     free_page_count = PBA_COUNT;
     invalid_page_count = 0;
     gc_count = 0;

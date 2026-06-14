@@ -30,8 +30,6 @@ trace_count: .word 0
 
 total_write_count:    .word 0
 total_read_count:     .word 0
-total_state_count:    .word 0
-total_simulated_time: .word 0
 free_page_count:      .word 8
 invalid_page_count:   .word 0
 gc_count:             .word 0
@@ -51,8 +49,6 @@ msg_data_eq:    .asciiz ", data = "
 msg_sep_state:  .asciiz " | State: "
 msg_sep_data:   .asciiz " | data "
 msg_colon_sp:   .asciiz ": "
-msg_ms:         .asciiz " ms\n"
-msg_state_op:   .asciiz "[State] "
 
 msg_write_lba:  .asciiz "Enter LBA to write (0-3): "
 msg_write_data: .asciiz "Enter data: "
@@ -81,8 +77,6 @@ msg_full_end:   .asciiz "================================\n"
 
 msg_st_writes:  .asciiz "Total WRITE count : "
 msg_st_reads:   .asciiz "Total READ count  : "
-msg_st_states:  .asciiz "State run count   : "
-msg_st_time:    .asciiz "Total time (ms)   : "
 msg_st_free:    .asciiz "FREE page count   : "
 msg_st_valid:   .asciiz "VALID page count  : "
 msg_st_inv:     .asciiz "INVALID page count: "
@@ -123,12 +117,10 @@ msg_trace_none: .asciiz "(No recorded events)\n"
 msg_reset_start: .asciiz "[Reset] Resetting SSD state...\n"
 msg_reset_done:  .asciiz "[Reset] Reset complete.\n"
 
-# 통합본 시작점
-# MARS/RARS가 main이 아니라 첫 .text 명령부터 실행하는 설정일 때를 대비한다.
         .text
 
 program_start:
-        j     main                  # 실제 프로그램 시작점으로 이동
+        j     main                  # 프로그램 시작점으로 이동
 
 # 공용 입출력 함수
 
@@ -171,48 +163,6 @@ print_separator:                    # 구분선 출력
 read_int:                           # 정수 하나를 입력받아 반환
         li    $v0, 5                # 정수 입력 준비
         syscall
-        jr    $ra                   # 호출한 곳으로 복귀
-
-run_state:                          # 상태 메시지와 시간을 같이 처리
-        addiu $sp, $sp, -12
-        sw    $ra, 8($sp)           # 복귀 주소
-        sw    $a0, 4($sp)           # 메시지 주소
-        sw    $a1, 0($sp)           # duration
-
-        la    $a0, msg_state_op     # "[상태] " 출력
-        li    $v0, 4
-        syscall
-
-        lw    $a0, 4($sp)           # 원래 메시지 출력
-        li    $v0, 4
-        syscall
-
-        lw    $a0, 0($sp)           # duration 출력
-        li    $v0, 1
-        syscall
-
-        la    $a0, msg_ms           # 단위 출력
-        li    $v0, 4
-        syscall
-        li    $a0, OUTPUT_DELAY_MS
-        li    $v0, 32
-        syscall
-
-        lw    $t0, total_state_count
-        addiu $t0, $t0, 1           # 상태 실행 수 +1
-        sw    $t0, total_state_count
-
-        lw    $t0, total_simulated_time
-        lw    $t1, 0($sp)
-        add   $t0, $t0, $t1         # 누적 시간에 duration 더함
-        sw    $t0, total_simulated_time
-
-        lw    $a0, 0($sp)           # duration만큼 대기
-        li    $v0, 32
-        syscall
-
-        lw    $ra, 8($sp)           # 복귀 주소 복구
-        addiu $sp, $sp, 12
         jr    $ra                   # 호출한 곳으로 복귀
 
 # LBA-PBA 매핑
@@ -1196,18 +1146,6 @@ print_statistics:                   # 누적 통계 출력
         jal   print_int
         jal   print_newline
 
-        la    $a0, msg_st_states    # 상태 실행 수 출력
-        jal   print_string
-        lw    $a0, total_state_count
-        jal   print_int
-        jal   print_newline
-
-        la    $a0, msg_st_time      # 누적 시간 출력
-        jal   print_string
-        lw    $a0, total_simulated_time
-        jal   print_int
-        jal   print_newline
-
         la    $a0, msg_st_free      # FREE page 수 출력
         jal   print_string
         lw    $a0, free_page_count
@@ -1408,8 +1346,7 @@ fwc_program_new:                    # 새 PBA에 data를 쓰고 mapping 갱신
         jal   log_write_event
 
         la    $a0, msg_write_ok
-        li    $a1, 1
-        jal   run_state
+        jal   print_string
         j     fwc_done
 
 fwc_no_free:                        # FREE PBA가 없으면 write 실패, trace/count 변경 없음
@@ -1544,8 +1481,6 @@ reset_ssd:                          # SSD 상태를 처음으로 돌림
 reset_statistics:                   # 통계 값을 처음 상태로 돌림
         sw    $zero, total_write_count
         sw    $zero, total_read_count
-        sw    $zero, total_state_count
-        sw    $zero, total_simulated_time
         sw    $zero, invalid_page_count
         sw    $zero, gc_count
         sw    $zero, erase_count
