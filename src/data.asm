@@ -6,6 +6,7 @@
         .eqv  INVALID,     2      # 오래된 page
 
         .eqv  TRACE_MAX,   20     # Trace 최대 개수
+        .eqv  OUTPUT_DELAY_MS, 50  # 출력 후 잠깐 대기
 
         .eqv  TTYPE_WRITE, 1      # trace event: write
         .eqv  TTYPE_READ,  2      # trace event: read

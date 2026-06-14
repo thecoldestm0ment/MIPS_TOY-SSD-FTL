@@ -1,5 +1,14 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 199309L
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 #define LBA_COUNT 4
 #define PBA_COUNT 8
@@ -11,6 +20,7 @@
 #define INVALID 2
 
 #define TRACE_MAX 20
+#define OUTPUT_DELAY_MS 50
 
 #define TTYPE_WRITE 1
 #define TTYPE_READ  2
@@ -55,10 +65,29 @@ static int gc_count = 0;
 static int erase_count = 0;
 
 /* util.asm */
-static void print_string(const char *s) { printf("%s", s); }
-static void print_int(int value) { printf("%d", value); }
-static void print_newline(void) { printf("\n"); }
-static void print_separator(void) { printf("-----------------------------\n"); }
+static void delay_ms(int ms)
+{
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}
+
+#define delayed_printf(...)                 \
+    do {                                    \
+        printf(__VA_ARGS__);                \
+        delay_ms(OUTPUT_DELAY_MS);          \
+    } while (0)
+
+static void print_string(const char *s) { delayed_printf("%s", s); }
+static void print_int(int value) { delayed_printf("%d", value); }
+static void print_newline(void) { delayed_printf("\n"); }
+static void print_separator(void) { delayed_printf("-----------------------------\n"); }
 
 static int read_int(void)                          /* 정수 하나 입력 */
 {
@@ -73,7 +102,7 @@ static int read_int(void)                          /* 정수 하나 입력 */
 
 static void run_state(const char *message, int ms) /* 상태 메시지와 시간 누적 */
 {
-    printf("[State] %s%d ms\n", message, ms);
+    delayed_printf("[State] %s%d ms\n", message, ms);
     total_state_count++;
     total_simulated_time += ms;
 }
@@ -324,21 +353,21 @@ static void print_trace_log(void)
     }
 
     for (i = 0; i < trace_count; i++) {
-        printf("%d | ", i);
+        delayed_printf("%d | ", i);
 
         if (trace_type[i] == TTYPE_WRITE) {
-            printf("WRITE | LBA %d | PBA %d | DATA %d\n",
-                   trace_lba[i], trace_pba[i], trace_data[i]);
+            delayed_printf("WRITE | LBA %d | PBA %d | DATA %d\n",
+                           trace_lba[i], trace_pba[i], trace_data[i]);
         } else if (trace_type[i] == TTYPE_READ) {
-            printf("READ  | LBA %d | PBA %d | DATA %d\n",
-                   trace_lba[i], trace_pba[i], trace_data[i]);
+            delayed_printf("READ  | LBA %d | PBA %d | DATA %d\n",
+                           trace_lba[i], trace_pba[i], trace_data[i]);
         } else if (trace_type[i] == TTYPE_GC) {
-            printf("GC    | Freed pages: %d\n", trace_data[i]);
+            delayed_printf("GC    | Freed pages: %d\n", trace_data[i]);
         } else if (trace_type[i] == TTYPE_RESET) {
-            printf("RESET\n");
+            delayed_printf("RESET\n");
         } else if (trace_type[i] == TTYPE_MIGRATE) {
-            printf("MIGRATE | LBA %d | PBA %d -> PBA %d\n",
-                   trace_lba[i], trace_pba[i], trace_data[i]);
+            delayed_printf("MIGRATE | LBA %d | PBA %d -> PBA %d\n",
+                           trace_lba[i], trace_pba[i], trace_data[i]);
         }
     }
 }
@@ -385,7 +414,7 @@ static void run_gc(void)
         return;
     }
 
-    printf("[GC] Victim block: %d\n", victim_block);
+    delayed_printf("[GC] Victim block: %d\n", victim_block);
 
     victim_start = victim_block * BLOCK_SIZE;
     victim_end = victim_start + BLOCK_SIZE;
@@ -430,7 +459,7 @@ static void run_gc(void)
                 return;
             }
 
-            printf("[GC] Move valid page PBA %d -> PBA %d\n", pba, new_pba);
+            delayed_printf("[GC] Move valid page PBA %d -> PBA %d\n", pba, new_pba);
 
             set_pba_state(new_pba, VALID);
             set_pba_data(new_pba, data);
@@ -440,14 +469,14 @@ static void run_gc(void)
     }
 
     /* 4. VALID page를 모두 옮겼으므로 victim block 전체를 erase한다. */
-    printf("[GC] Erase block %d -> FREE pages\n", victim_block);
+    delayed_printf("[GC] Erase block %d -> FREE pages\n", victim_block);
     erase_block(victim_block);
     recount_page_counts();
 
     gc_count++;
     erase_count++;
 
-    printf("[GC] Freed page count: %d\n", victim_invalid_count);
+    delayed_printf("[GC] Freed page count: %d\n", victim_invalid_count);
     print_string("[GC] Done\n");
 
     log_gc_event(victim_invalid_count);
@@ -471,23 +500,23 @@ static int count_valid_pages(void)                  /* VALID page 개수 계산 
 static void print_page_state_summary(void)
 {
     print_string("[Page State Summary]\n");
-    printf("  FREE    : %d\n", free_page_count);
-    printf("  VALID   : %d\n", count_valid_pages());
-    printf("  INVALID : %d\n", invalid_page_count);
+    delayed_printf("  FREE    : %d\n", free_page_count);
+    delayed_printf("  VALID   : %d\n", count_valid_pages());
+    delayed_printf("  INVALID : %d\n", invalid_page_count);
 }
 
 static void print_statistics(void)
 {
     print_string("[Statistics]\n");
-    printf("Total WRITE count : %d\n", total_write_count);
-    printf("Total READ count  : %d\n", total_read_count);
-    printf("State run count   : %d\n", total_state_count);
-    printf("Total time (ms)   : %d\n", total_simulated_time);
-    printf("FREE page count   : %d\n", free_page_count);
-    printf("VALID page count  : %d\n", count_valid_pages());
-    printf("INVALID page count: %d\n", invalid_page_count);
-    printf("GC run count      : %d\n", gc_count);
-    printf("Block erase count : %d\n", erase_count);
+    delayed_printf("Total WRITE count : %d\n", total_write_count);
+    delayed_printf("Total READ count  : %d\n", total_read_count);
+    delayed_printf("State run count   : %d\n", total_state_count);
+    delayed_printf("Total time (ms)   : %d\n", total_simulated_time);
+    delayed_printf("FREE page count   : %d\n", free_page_count);
+    delayed_printf("VALID page count  : %d\n", count_valid_pages());
+    delayed_printf("INVALID page count: %d\n", invalid_page_count);
+    delayed_printf("GC run count      : %d\n", gc_count);
+    delayed_printf("Block erase count : %d\n", erase_count);
 }
 
 static void print_full_status(void)
@@ -511,7 +540,7 @@ static void ftl_write_core(int lba, int data)
     int old_pba;
     int new_pba;
 
-    printf("Selected LBA: %d\n", lba);
+    delayed_printf("Selected LBA: %d\n", lba);
 
     old_pba = get_lba_mapping(lba);
 
@@ -526,8 +555,8 @@ static void ftl_write_core(int lba, int data)
     }
 
     if (old_pba != -1) {
-        printf("Old PBA: %d\n", old_pba);
-        printf("PBA %d -> INVALID\n", old_pba);
+        delayed_printf("Old PBA: %d\n", old_pba);
+        delayed_printf("PBA %d -> INVALID\n", old_pba);
         set_pba_state(old_pba, INVALID);
     } else {
         print_string("This LBA has no previous mapping.\n");
@@ -540,8 +569,8 @@ static void ftl_write_core(int lba, int data)
     recount_page_counts();
     total_write_count++;
 
-    printf("Assigned new PBA: %d\n", new_pba);
-    printf("LBA %d -> PBA %d, data = %d\n", lba, new_pba, data);
+    delayed_printf("Assigned new PBA: %d\n", new_pba);
+    delayed_printf("LBA %d -> PBA %d, data = %d\n", lba, new_pba, data);
 
     log_write_event(lba, new_pba, data);
     run_state("Write complete. ", 1);
@@ -572,7 +601,7 @@ static void ftl_read_core(int lba)
     int pba;
     int data;
 
-    printf("Reading LBA: %d\n", lba);
+    delayed_printf("Reading LBA: %d\n", lba);
 
     pba = get_lba_mapping(lba);
     if (pba == -1) {
@@ -580,10 +609,10 @@ static void ftl_read_core(int lba)
         return;
     }
 
-    printf("Mapped PBA: %d\n", pba);
+    delayed_printf("Mapped PBA: %d\n", pba);
 
     data = get_pba_data(pba);
-    printf("data: %d\n", data);
+    delayed_printf("data: %d\n", data);
 
     total_read_count++;
     log_read_event(lba, pba, data);
