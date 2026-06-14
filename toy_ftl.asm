@@ -123,10 +123,6 @@ msg_trace_none: .asciiz "(No recorded events)\n"
 msg_reset_start: .asciiz "[Reset] Resetting SSD state...\n"
 msg_reset_done:  .asciiz "[Reset] Reset complete.\n"
 
-msg_demo_hdr:   .asciiz "\n--- Demo start ---\n"
-msg_demo_step:  .asciiz "[Demo] Step "
-msg_demo_end:   .asciiz "--- Demo end ---\n"
-
 # 통합본 시작점
 # MARS/RARS가 main이 아니라 첫 .text 명령부터 실행하는 설정일 때를 대비한다.
         .text
@@ -141,7 +137,7 @@ program_start:
 print_string:                       # $a0가 가리키는 문자열 출력
         li    $v0, 4                # 문자열 출력 준비
         syscall
-        li    $a0, OUTPUT_DELAY_MS  
+        li    $a0, OUTPUT_DELAY_MS
         li    $v0, 32
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
@@ -149,7 +145,7 @@ print_string:                       # $a0가 가리키는 문자열 출력
 print_int:                          # $a0에 든 정수 출력
         li    $v0, 1                # 정수 출력 준비
         syscall
-        li    $a0, OUTPUT_DELAY_MS  
+        li    $a0, OUTPUT_DELAY_MS
         li    $v0, 32
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
@@ -158,7 +154,7 @@ print_newline:                      # 줄바꿈 1번 출력
         la    $a0, msg_newline      # 줄바꿈 문자열 주소
         li    $v0, 4                # 문자열 출력 준비
         syscall
-        li    $a0, OUTPUT_DELAY_MS  
+        li    $a0, OUTPUT_DELAY_MS
         li    $v0, 32
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
@@ -167,7 +163,7 @@ print_separator:                    # 구분선 출력
         la    $a0, msg_separator    # 구분선 문자열 주소
         li    $v0, 4                # 문자열 출력 준비
         syscall
-        li    $a0, OUTPUT_DELAY_MS  
+        li    $a0, OUTPUT_DELAY_MS
         li    $v0, 32
         syscall
         jr    $ra                   # 호출한 곳으로 복귀
@@ -198,7 +194,7 @@ run_state:                          # 상태 메시지와 시간을 같이 처�
         la    $a0, msg_ms           # 단위 출력
         li    $v0, 4
         syscall
-        li    $a0, OUTPUT_DELAY_MS  
+        li    $a0, OUTPUT_DELAY_MS
         li    $v0, 32
         syscall
 
@@ -541,7 +537,7 @@ pppt_done:                          # 출력 끝
 
 # Trace logging and printing
 # trace는 실행 중 일어난 일을 순서대로 저장해 나중에 한 번에 출력한다.
-# 공통 저장 규칙:
+# 
 #   trace_type = 이벤트 종류(WRITE/READ/GC/RESET/MIGRATE)
 #   trace_lba  = 관련 LBA, 없으면 -1
 #   trace_pba  = 관련 PBA 또는 migration 전 old PBA
@@ -1560,171 +1556,116 @@ reset_statistics:                   # 통계 값을 처음 상태로 돌림
         jr    $ra                   # 호출한 곳으로 복귀
 
 # Demo scenario
-# 이 demo는 GC migration을 눈으로 확인하기 위한 고정 시나리오다.
-# 핵심 상태:
 #   1) LBA 2를 두 번 쓰면 첫 PBA는 INVALID, 새 PBA는 VALID가 된다.
 #   2) 같은 block 안의 LBA 1 VALID page를 GC가 다른 block으로 migration한다.
 #   3) GC 후 LBA 1 read와 trace log로 data가 보존됐는지 확인한다.
 
         .text
 
-run_demo_scenario:                  # overwrite -> migration GC -> read/trace 확인 순서로 실행
+run_demo_scenario:                  # 자동 입력값으로 overwrite -> migration GC -> read/trace 확인
         addiu $sp, $sp, -4
         sw    $ra, 0($sp)           # demo가 끝난 뒤 menu로 돌아가기 위한 복귀 주소
 
-        la    $a0, msg_demo_hdr
+        la    $a0, msg_write_lba    # Enter LBA to write (0-3): 2
         jal   print_string
-
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 1
+        li    $a0, 2
         jal   print_int
-        la    $a0, msg_demo_s1
+        jal   print_newline
+        la    $a0, msg_write_data   # Enter data: 100
         jal   print_string
+        li    $a0, 100
+        jal   print_int
+        jal   print_newline
 
         li    $a0, 2                # LBA 2를 처음 쓰면 보통 첫 FREE PBA(PBA 0)에 저장
         li    $a1, 100              # data = 100
         jal   ftl_write_core
         jal   print_separator
 
-        la    $a0, msg_demo_step
+        la    $a0, msg_write_lba    # Enter LBA to write (0-3): 1
         jal   print_string
-        li    $a0, 2
+        li    $a0, 1
         jal   print_int
-        la    $a0, msg_demo_s2
+        jal   print_newline
+        la    $a0, msg_write_data   # Enter data: 50
         jal   print_string
+        li    $a0, 50
+        jal   print_int
+        jal   print_newline
 
         li    $a0, 1                # LBA 1은 다음 FREE PBA(PBA 1)에 저장되어 block 0에 남음
         li    $a1, 50               # data = 50
         jal   ftl_write_core
         jal   print_separator
 
-        la    $a0, msg_demo_step
+        la    $a0, msg_read_lba     # Enter LBA to read (0-3): 2
         jal   print_string
-        li    $a0, 3
+        li    $a0, 2
         jal   print_int
-        la    $a0, msg_demo_s3
-        jal   print_string
+        jal   print_newline
 
         li    $a0, 2                # overwrite 전 read가 정상인지 먼저 확인
         jal   ftl_read_core
         jal   print_separator
 
-        la    $a0, msg_demo_step
+        la    $a0, msg_write_lba    # Enter LBA to write (0-3): 2
         jal   print_string
-        li    $a0, 4
+        li    $a0, 2
         jal   print_int
-        la    $a0, msg_demo_s4
+        jal   print_newline
+        la    $a0, msg_write_data   # Enter data: 200
         jal   print_string
+        li    $a0, 200
+        jal   print_int
+        jal   print_newline
 
         li    $a0, 2                # LBA 2 overwrite: old PBA 0은 INVALID, 새 PBA는 VALID
         li    $a1, 200              # data = 200
         jal   ftl_write_core
         jal   print_separator
 
-        la    $a0, msg_demo_step
+        la    $a0, msg_read_lba     # Enter LBA to read (0-3): 2
         jal   print_string
-        li    $a0, 5
+        li    $a0, 2
         jal   print_int
-        la    $a0, msg_demo_s5
-        jal   print_string
+        jal   print_newline
 
         li    $a0, 2                # mapping이 새 PBA를 가리켜서 200이 읽혀야 함
         jal   ftl_read_core
         jal   print_separator
 
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 6
-        jal   print_int
-        la    $a0, msg_demo_s6
-        jal   print_string
-
         jal   print_mapping_table   # GC 전 LBA 1/LBA 2가 어떤 PBA를 가리키는지 확인
         jal   print_separator
-
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 7
-        jal   print_int
-        la    $a0, msg_demo_s7
-        jal   print_string
 
         jal   print_physical_page_table
                                       # 여기서 block 0은 PBA 0 INVALID + PBA 1 VALID 상태가 됨
         jal   print_separator
 
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 8
-        jal   print_int
-        la    $a0, msg_demo_s8
-        jal   print_string
-
         jal   run_gc                 # block 0 victim 선택 후 PBA 1의 VALID page를 밖으로 이동
         jal   print_separator
 
-        la    $a0, msg_demo_step
+        la    $a0, msg_read_lba     # Enter LBA to read (0-3): 1
         jal   print_string
-        li    $a0, 9
+        li    $a0, 1
         jal   print_int
-        la    $a0, msg_demo_s9
-        jal   print_string
+        jal   print_newline
 
         li    $a0, 1                # migration 후에도 LBA 1은 data 50을 읽어야 함
         jal   ftl_read_core
         jal   print_separator
 
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 10
-        jal   print_int
-        la    $a0, msg_demo_s10
-        jal   print_string
-
         jal   print_mapping_table   # LBA 1 mapping이 old PBA 1에서 new PBA로 바뀐 것 확인
         jal   print_separator
-
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 11
-        jal   print_int
-        la    $a0, msg_demo_s11
-        jal   print_string
 
         jal   print_physical_page_table
                                       # victim block은 erase되어 PBA 0/PBA 1이 FREE가 되어야 함
         jal   print_separator
 
-        la    $a0, msg_demo_step
-        jal   print_string
-        li    $a0, 12
-        jal   print_int
-        la    $a0, msg_demo_s12
-        jal   print_string
-
         jal   print_trace_log       # MIGRATE event와 GC event가 순서대로 남는지 확인
-
-        la    $a0, msg_demo_end
-        jal   print_string
 
         lw    $ra, 0($sp)           # 복귀 주소 복구
         addiu $sp, $sp, 4
         jr    $ra
-
-        .data
-msg_demo_s1:  .asciiz ": Write 100 to LBA 2\n"
-msg_demo_s2:  .asciiz ": Write 50 to LBA 1\n"
-msg_demo_s3:  .asciiz ": Read LBA 2\n"
-msg_demo_s4:  .asciiz ": Write 200 to LBA 2 again\n"
-msg_demo_s5:  .asciiz ": Read LBA 2 again (expect 200)\n"
-msg_demo_s6:  .asciiz ": Print mapping table before GC\n"
-msg_demo_s7:  .asciiz ": Print physical page table before GC\n"
-msg_demo_s8:  .asciiz ": Run GC (expect valid page migration)\n"
-msg_demo_s9:  .asciiz ": Read LBA 1 after GC (expect 50)\n"
-msg_demo_s10: .asciiz ": Print mapping table after GC\n"
-msg_demo_s11: .asciiz ": Print physical page table after GC\n"
-msg_demo_s12: .asciiz ": Print trace log\n"
 
 # 메뉴용 래퍼 함수
 
@@ -1818,8 +1759,7 @@ cmd_gc:                             # GC 메뉴 처리
 # 메인 메뉴
 
         .text
-
-main:
+main:                               # 프로그램 시작
         j     menu_loop             # 바로 메뉴로 이동
 
 menu_loop:                          # 메뉴를 계속 반복

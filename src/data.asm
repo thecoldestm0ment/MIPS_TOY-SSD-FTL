@@ -122,7 +122,3 @@ msg_trace_none: .asciiz "(No recorded events)\n"
 
 msg_reset_start: .asciiz "[Reset] Resetting SSD state...\n"
 msg_reset_done:  .asciiz "[Reset] Reset complete.\n"
-
-msg_demo_hdr:   .asciiz "\n--- Demo start ---\n"
-msg_demo_step:  .asciiz "[Demo] Step "
-msg_demo_end:   .asciiz "--- Demo end ---\n"

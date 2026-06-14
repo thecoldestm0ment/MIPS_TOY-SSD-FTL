@@ -1,6 +1,6 @@
 # Trace logging and printing
 # trace는 실행 중 일어난 일을 순서대로 저장해 나중에 한 번에 출력한다.
-# 공통 저장 규칙:
+# 
 #   trace_type = 이벤트 종류(WRITE/READ/GC/RESET/MIGRATE)
 #   trace_lba  = 관련 LBA, 없으면 -1
 #   trace_pba  = 관련 PBA 또는 migration 전 old PBA

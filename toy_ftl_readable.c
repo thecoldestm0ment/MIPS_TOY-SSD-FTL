@@ -662,56 +662,67 @@ static void reset_ssd(void)
 /* demo.asm */
 static void run_demo_scenario(void)
 {
-    print_string("\n--- Demo start ---\n");
-
-    print_string("[Demo] Step 1: Write 100 to LBA 2\n");
+    print_string("Enter LBA to write (0-3): ");
+    print_int(2);
+    print_newline();
+    print_string("Enter data: ");
+    print_int(100);
+    print_newline();
     ftl_write_core(2, 100);        /* PBA 0에 LBA 2의 data 100 저장 */
     print_separator();
 
-    print_string("[Demo] Step 2: Write 50 to LBA 1\n");
+    print_string("Enter LBA to write (0-3): ");
+    print_int(1);
+    print_newline();
+    print_string("Enter data: ");
+    print_int(50);
+    print_newline();
     ftl_write_core(1, 50);         /* PBA 1에 LBA 1의 data 50 저장 */
     print_separator();
 
-    print_string("[Demo] Step 3: Read LBA 2\n");
+    print_string("Enter LBA to read (0-3): ");
+    print_int(2);
+    print_newline();
     ftl_read_core(2);
     print_separator();
 
-    print_string("[Demo] Step 4: Write 200 to LBA 2 again\n");
+    print_string("Enter LBA to write (0-3): ");
+    print_int(2);
+    print_newline();
+    print_string("Enter data: ");
+    print_int(200);
+    print_newline();
     ftl_write_core(2, 200);        /* PBA 0은 INVALID, 새 PBA는 VALID */
     print_separator();
 
-    print_string("[Demo] Step 5: Read LBA 2 again (expect 200)\n");
+    print_string("Enter LBA to read (0-3): ");
+    print_int(2);
+    print_newline();
     ftl_read_core(2);
     print_separator();
 
-    print_string("[Demo] Step 6: Print mapping table before GC\n");
     print_mapping_table();
     print_separator();
 
-    print_string("[Demo] Step 7: Print physical page table before GC\n");
     print_physical_page_table();   /* block 0: PBA 0 INVALID + PBA 1 VALID */
     print_separator();
 
-    print_string("[Demo] Step 8: Run GC (expect valid page migration)\n");
     run_gc();                      /* PBA 1의 VALID page를 victim 밖 FREE PBA로 이동 */
     print_separator();
 
-    print_string("[Demo] Step 9: Read LBA 1 after GC (expect 50)\n");
+    print_string("Enter LBA to read (0-3): ");
+    print_int(1);
+    print_newline();
     ftl_read_core(1);              /* migration 후에도 LBA 1 data가 보존됐는지 확인 */
     print_separator();
 
-    print_string("[Demo] Step 10: Print mapping table after GC\n");
     print_mapping_table();         /* LBA 1 mapping이 old PBA에서 new PBA로 바뀐 것 확인 */
     print_separator();
 
-    print_string("[Demo] Step 11: Print physical page table after GC\n");
     print_physical_page_table();   /* victim block은 erase되어 FREE/data 0이 되어야 함 */
     print_separator();
 
-    print_string("[Demo] Step 12: Print trace log\n");
     print_trace_log();             /* MIGRATE와 GC event가 같이 남는지 확인 */
-
-    print_string("--- Demo end ---\n");
 }
 
 /* command.asm */

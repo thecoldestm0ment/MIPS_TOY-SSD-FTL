@@ -13,7 +13,7 @@ run_gc:                              # victim block을 고르고 VALID page를 �
         sw    $s5, 20($sp)          # victim start pba
         sw    $s6, 16($sp)          # victim end pba
         sw    $s7, 12($sp)          # current pba
-                                      # 8($sp)=data, 4($sp)=lba, 0($sp)=dest pba
+                                    # 8($sp)=data, 4($sp)=lba, 0($sp)=dest pba
 
         la    $a0, msg_gc_block_start
         jal   print_string
