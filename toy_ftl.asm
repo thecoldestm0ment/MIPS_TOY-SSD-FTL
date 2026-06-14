@@ -1490,10 +1490,10 @@ ftl_read_core:                      # LBA에 연결된 data를 읽어서 출력
 
         move  $a0, $s1              # PBA에 저장된 data 읽기
         jal   get_pba_data
+        move  $s0, $v0              # syscall 출력 전에 data를 먼저 보관
 
         la    $a0, msg_data_val     # data 출력
         jal   print_string
-        move  $s0, $v0              # data를 잠깐 저장
         move  $a0, $s0
         jal   print_int
         jal   print_newline
